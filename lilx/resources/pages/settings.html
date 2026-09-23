@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="{{lang}}" data-theme="{{theme}}">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; form-action 'none'; base-uri 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="settings.title"></title>
+  <link rel="icon" href="/assets/logo.png">
+  <link rel="stylesheet" href="/assets/lilx.css">
+  <link rel="stylesheet" href="/assets/theme.css" id="theme-css">
+  <script src="/assets/i18n.js" defer></script>
+  <script src="/assets/lilx.js" defer></script>
+  <script src="/assets/settings.js" defer></script>
+</head>
+<body class="page-settings">
+  <header class="topbar">
+    <a class="brand" href="lilx://home">lil<span>x</span></a>
+    <nav class="nav">
+      <a href="lilx://history" data-i18n="nav.history"></a>
+      <a href="lilx://downloads" data-i18n="nav.downloads"></a>
+      <a href="lilx://extensions" data-i18n="nav.extensions"></a>
+      <a href="lilx://settings" aria-current="page" data-i18n="nav.settings"></a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1 data-i18n="settings.title"></h1>
+        <p class="subtitle" data-i18n="settings.autosave"></p>
+      </div>
+    </div>
+    <div class="settings-search">
+      <input id="settings-query" type="search" data-i18n-placeholder="settings.search_placeholder" aria-label="Search" autofocus>
+    </div>
+    <p class="empty" id="settings-no-match" hidden data-i18n="settings.no_match"></p>
+
+    <section class="card" id="language">
+      <h2 data-i18n="settings.language"></h2>
+      <p class="hint" data-i18n="settings.language_hint"></p>
+      <div class="segmented" id="languages" role="radiogroup"></div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="settings.search"></h2>
+      <p class="hint" data-i18n="settings.search_hint"></p>
+      <div class="segmented" id="engines" role="radiogroup"></div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="settings.appearance"></h2>
+      <p class="hint" data-i18n="settings.appearance_hint"></p>
+      <div class="segmented" id="themes" role="radiogroup"></div>
+
+      <h3 data-i18n="accent.title"></h3>
+      <p class="hint" data-i18n="accent.hint"></p>
+      <div class="segmented" id="accent-modes" role="radiogroup"></div>
+      <div class="accent-editor" id="accent-editor" hidden>
+        <div class="swatches" id="accent-swatches"></div>
+        <div class="accent-grid">
+          <div class="accent-preview" id="accent-preview">
+            <span class="preview-button" id="accent-preview-button" data-i18n="accent.preview_button"></span>
+            <span class="preview-switch" id="accent-preview-switch"><span></span></span>
+          </div>
+          <div class="rgb" id="accent-rgb"></div>
+          <div class="hex-row">
+            <label class="hex-label"><span>HEX</span>
+              <input id="accent-hex" type="text" maxlength="7" spellcheck="false" aria-label="HEX">
+            </label>
+            <input id="accent-picker" type="color" data-i18n-title="accent.picker">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="settings.homepage"></h2>
+      <p class="hint" data-i18n="settings.homepage_hint"></p>
+      <form class="row" id="homepage-form" autocomplete="off">
+        <input id="homepage" type="text" aria-label="Home page" spellcheck="false">
+        <button type="submit" data-i18n="settings.save"></button>
+      </form>
+    </section>
+
+    <section class="card" id="home-page">
+      <h2 data-i18n="homecard.title"></h2>
+      <p class="hint" data-i18n="homecard.hint"></p>
+      <div id="home-toggles"></div>
+      <div class="setting" id="hidden-sites-row">
+        <div>
+          <div class="label" data-i18n="homecard.hidden"></div>
+          <div class="desc" id="hidden-sites-desc"></div>
+        </div>
+        <button id="restore-top-sites" type="button" data-i18n="homecard.restore"></button>
+      </div>
+    </section>
+
+    <section class="card" id="content">
+      <h2 data-i18n="content.title"></h2>
+      <p class="hint" data-i18n="content.hint"></p>
+      <div id="content-selects"></div>
+      <div class="font-preview" id="font-preview">
+        <span data-i18n="content.preview"></span>
+        <code id="font-preview-mono">const lilx = "fast, private, minimal";</code>
+      </div>
+      <div id="content-toggles" class="toggles-top"></div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="settings.privacy"></h2>
+      <div id="privacy-toggles"></div>
+    </section>
+
+    <section class="card" id="lilblock">
+      <h2 data-i18n="lilblock.title"></h2>
+      <p class="hint" data-i18n="lilblock.hint"></p>
+      <div id="lilblock-toggle"></div>
+      <p class="hint" id="lilblock-lists"></p>
+
+      <h3 data-i18n="lilblock.exceptions"></h3>
+      <p class="hint" data-i18n="lilblock.exceptions_hint"></p>
+      <form class="row" id="allow-form" autocomplete="off">
+        <input id="allow-host" type="text" placeholder="example.com" aria-label="Site" spellcheck="false">
+        <button type="submit" data-i18n="lilblock.add"></button>
+      </form>
+      <div id="allowlist" class="list entries"></div>
+      <div class="actions">
+        <button class="danger" id="clear-allowlist" type="button" data-i18n="lilblock.clear_exceptions"></button>
+      </div>
+
+      <h3 data-i18n="lilblock.history"></h3>
+      <p class="hint" id="block-total"></p>
+      <div class="block-columns">
+        <div>
+          <div class="day" data-i18n="lilblock.top"></div>
+          <div id="block-hosts" class="list"></div>
+        </div>
+        <div>
+          <div class="day" data-i18n="lilblock.recent"></div>
+          <div id="block-recent" class="list"></div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="danger" id="clear-block-log" type="button" data-i18n="lilblock.clear_history"></button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="forget.title"></h2>
+      <p class="hint" data-i18n="forget.hint"></p>
+      <form id="rule-form" autocomplete="off">
+        <div class="row">
+          <input id="rule-host" type="text" placeholder="example.com" aria-label="Site" spellcheck="false">
+          <button class="primary" type="submit" data-i18n="forget.add"></button>
+        </div>
+        <div class="checks">
+          <label><input type="checkbox" id="rule-cookies" checked> <span data-i18n="forget.cookies"></span></label>
+          <label><input type="checkbox" id="rule-site-data" checked> <span data-i18n="forget.site_data"></span></label>
+          <label><input type="checkbox" id="rule-history" checked> <span data-i18n="forget.history"></span></label>
+        </div>
+      </form>
+      <p class="hint" id="site-data-note"></p>
+      <div id="rules" class="list"></div>
+    </section>
+
+    <section class="card" id="downloads">
+      <h2 data-i18n="dl.title"></h2>
+      <p class="hint" data-i18n="dl.hint"></p>
+      <div class="folder-row">
+        <div class="folder-icon" aria-hidden="true"></div>
+        <div class="grow">
+          <div class="folder-path" id="download-dir-current"></div>
+          <div class="sub" id="download-dir-kind"></div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="download-dir-choose" type="button" data-i18n="dl.change"></button>
+          <button id="download-dir-open" type="button" data-i18n="dl.open"></button>
+          <button class="ghost" id="download-dir-default" type="button" data-i18n="dl.default"></button>
+        </div>
+      </div>
+      <details class="manual">
+        <summary data-i18n="dl.manual"></summary>
+        <form class="row" id="download-form" autocomplete="off">
+          <input id="download-dir" type="text" aria-label="Download folder" spellcheck="false">
+          <button type="submit" data-i18n="settings.save"></button>
+        </form>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="data.title"></h2>
+      <p class="hint" id="storage-summary"></p>
+      <div class="actions">
+        <button class="danger" id="clear-history" type="button" data-i18n="data.clear_history"></button>
+        <button class="danger" id="clear-cookies" type="button" data-i18n="data.clear_cookies"></button>
+        <button class="danger" id="clear-cache" type="button" data-i18n="data.clear_cache"></button>
+        <button class="danger" id="clear-downloads" type="button" data-i18n="data.clear_downloads"></button>
+      </div>
+      <p class="hint" id="storage-location"></p>
+      <p><span class="badge warn" id="encryption-badge"></span></p>
+    </section>
+
+    <section class="card danger-zone" id="reset">
+      <h2 data-i18n="reset.title"></h2>
+      <p class="hint" data-i18n="reset.hint"></p>
+      <div class="reset-row">
+        <button class="danger strong" id="reset-button" type="button" data-i18n="reset.button"></button>
+        <div class="reset-steps" id="reset-steps" aria-hidden="true"><span></span><span></span><span></span></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="about.title"></h2>
+      <p class="hint" id="about"></p>
+    </section>
+  </main>
+</body>
+</html>

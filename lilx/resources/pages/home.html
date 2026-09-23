@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="{{lang}}" data-theme="{{theme}}">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; form-action 'none'; base-uri 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="home.title"></title>
+  <link rel="icon" href="/assets/logo.png">
+  <link rel="stylesheet" href="/assets/lilx.css">
+  <link rel="stylesheet" href="/assets/theme.css" id="theme-css">
+  <script src="/assets/i18n.js" defer></script>
+  <script src="/assets/lilx.js" defer></script>
+  <script src="/assets/home.js" defer></script>
+</head>
+<body class="page-home">
+  <header class="topbar">
+    <a class="brand" href="lilx://home">lil<span>x</span></a>
+    <nav class="nav">
+      <a href="lilx://history" data-i18n="nav.history"></a>
+      <a href="lilx://downloads" data-i18n="nav.downloads"></a>
+      <a href="lilx://extensions" data-i18n="nav.extensions"></a>
+      <a href="lilx://settings" data-i18n="nav.settings"></a>
+    </nav>
+  </header>
+
+  <main class="home">
+    <h1 class="wordmark">lil<span>x</span></h1>
+    <form class="search" id="search-form" autocomplete="off">
+      <input id="search-input" type="search" name="q" data-i18n-placeholder="home.placeholder"
+             aria-label="Search" autofocus>
+      <button class="primary" type="submit" data-i18n="home.go"></button>
+    </form>
+
+    <section class="home-section" id="bookmarks-section" hidden>
+      <div class="section-head">
+        <span data-i18n="home.bookmarks"></span>
+      </div>
+      <form class="bookmark-form" id="bookmark-form" autocomplete="off" hidden>
+        <input id="bm-url" type="text" data-i18n-placeholder="home.bm_url" spellcheck="false">
+        <input id="bm-title" type="text" data-i18n-placeholder="home.bm_title">
+        <button class="primary" type="submit" data-i18n="home.bm_save"></button>
+        <button class="ghost" id="bm-cancel" type="button" data-i18n="home.bm_cancel"></button>
+      </form>
+      <div class="tiles" id="bookmarks"></div>
+    </section>
+
+    <section class="home-section" id="top-section" hidden>
+      <div class="section-head">
+        <span data-i18n="home.top_sites"></span>
+        <button class="ghost small" id="hide-top-sites" type="button" data-i18n="home.hide_section"
+                data-i18n-title="home.hide_section_title"></button>
+      </div>
+      <div class="tiles" id="tiles"></div>
+    </section>
+    <div class="privacy-strip" id="privacy"></div>
+  </main>
+</body>
+</html>

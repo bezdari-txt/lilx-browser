@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lilx"
+version = "0.1.0"
+description = "lilx — a minimalist, privacy-first desktop web browser"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    # QtWebEngine lives in the Addons wheel; it pulls in PySide6-Essentials.
+    "PySide6-Addons>=6.10",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+]
+
+[project.scripts]
+lilx = "lilx.app:main"
+
+[tool.setuptools.packages.find]
+include = ["lilx*"]
+
+[tool.setuptools.package-data]
+lilx = ["resources/**/*"]

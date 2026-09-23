@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=lilx
+GenericName=Web Browser
+Comment=Minimalist, privacy-first web browser
+Exec=lilx %U
+Icon=lilx
+Terminal=false
+Categories=Network;WebBrowser;
+StartupNotify=true
+# Must match QGuiApplication.desktopFileName / applicationName ("lilx"):
+# Wayland compositors map the window's app_id to this file, X11 docks use WM_CLASS.
+StartupWMClass=lilx

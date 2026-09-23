@@ -1,0 +1,3 @@
+# Runtime dependencies of lilx. Keep this list minimal.
+# PySide6-Addons contains QtWebEngine and depends on PySide6-Essentials.
+PySide6-Addons>=6.10

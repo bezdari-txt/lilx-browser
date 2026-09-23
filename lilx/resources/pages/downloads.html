@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="{{lang}}" data-theme="{{theme}}">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; form-action 'none'; base-uri 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="downloads.title"></title>
+  <link rel="icon" href="/assets/logo.png">
+  <link rel="stylesheet" href="/assets/lilx.css">
+  <link rel="stylesheet" href="/assets/theme.css" id="theme-css">
+  <script src="/assets/i18n.js" defer></script>
+  <script src="/assets/lilx.js" defer></script>
+  <script src="/assets/downloads.js" defer></script>
+</head>
+<body class="page-downloads">
+  <header class="topbar">
+    <a class="brand" href="lilx://home">lil<span>x</span></a>
+    <nav class="nav">
+      <a href="lilx://history" data-i18n="nav.history"></a>
+      <a href="lilx://downloads" aria-current="page" data-i18n="nav.downloads"></a>
+      <a href="lilx://extensions" data-i18n="nav.extensions"></a>
+      <a href="lilx://settings" data-i18n="nav.settings"></a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1 data-i18n="downloads.title"></h1>
+        <p class="subtitle"><span data-i18n="downloads.saving_to"></span> <span id="directory" class="path">…</span></p>
+      </div>
+      <div class="actions">
+        <button id="change-dir" type="button" data-i18n="dl.change"></button>
+        <button id="open-dir" type="button" data-i18n="dl.open"></button>
+        <button id="clear" type="button" data-i18n="downloads.clear"></button>
+      </div>
+    </div>
+    <div class="card">
+      <input id="query" type="search" data-i18n-placeholder="downloads.search" aria-label="Search" autofocus>
+      <div id="items" class="entries"></div>
+    </div>
+  </main>
+</body>
+</html>

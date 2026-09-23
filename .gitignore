@@ -1,0 +1,156 @@
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ---------------------------------------------------------------------------
+# Build output (PyInstaller, setuptools). packaging/lilx.spec is source: kept.
+# ---------------------------------------------------------------------------
+build/
+dist/
+*.manifest
+*.pyz
+*.toc
+warn-*.txt
+xref-*.html
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.obj
+*.app/
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.msi
+
+# ---------------------------------------------------------------------------
+# OS and editor files
+# ---------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.directory
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+\#*\#
+.#*
+*.bak
+*.tmp
+*.orig
+
+# ---------------------------------------------------------------------------
+# Logs, crash and core dumps
+# ---------------------------------------------------------------------------
+*.log
+logs/
+*.dmp
+*.mdmp
+*.crash
+*.ips
+# core dumps (anchored: lilx/core/ is source code)
+/core
+/core.[0-9]*
+crashpad/
+Crashpad/
+Crash Reports/
+
+# ---------------------------------------------------------------------------
+# Secrets and local configuration
+# ---------------------------------------------------------------------------
+.env
+.env.*
+*.env
+secrets/
+credentials*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.keychain
+local_settings.*
+
+# ---------------------------------------------------------------------------
+# lilx browser data. The real profile lives outside the project (see
+# lilx/paths.py); these patterns catch profiles pointed here with
+# LILX_DATA_DIR or copied in by accident.
+# ---------------------------------------------------------------------------
+# whole profile / cache folders
+.lilx-dev/
+lilx-data/
+lilx-profile*/
+profile/
+profiles/
+webengine/
+QtWebEngine/
+cache/
+Cache/
+# lilx's own data files (settings, history, downloads, bookmarks, lilBlock, extensions)
+/settings.json
+/settings.json.corrupted
+/downloads.json
+/bookmarks.json
+/lilblock-log.json
+/extensions.json
+/reset-pending
+/filters/
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+*.db
+*.db-journal
+# Chromium / QtWebEngine runtime data (cookies, storage, history, caches)
+Cookies
+Cookies-journal
+History
+History-journal
+Favicons
+Favicons-journal
+Visited Links
+Network Persistent State
+TransportSecurity
+Trust Tokens
+Trust Tokens-journal
+Local Storage/
+Session Storage/
+IndexedDB/
+Service Worker/
+Code Cache/
+GPUCache/
+DawnGraphiteCache/
+DawnWebGPUCache/
+blob_storage/
+Shared Dictionary/
+user_prefs.json
+*.ldb
