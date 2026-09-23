@@ -45,11 +45,13 @@ from lilx.engine.api import InternalApi
 from lilx.engine.browser_data import BrowserDataManager
 from lilx.engine.extensions import ExtensionError, ExtensionService
 from lilx.engine.lilblock import LilBlock, ProfileBlocker
+from lilx.engine.permissions import PermissionService
 from lilx.engine.profile import create_profile
 from lilx.engine.scheme import SCHEME_BYTES, LilxSchemeHandler, register_scheme
 from lilx.i18n import resolve_language, set_language, tr
 from lilx.paths import AppPaths
 from lilx.ui.main_window import MainWindow
+from lilx.ui.windows import WindowManager
 from lilx.ui.theme import page_css, resolve_theme
 
 log = logging.getLogger("lilx")
@@ -60,6 +62,8 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("urls", nargs="*", help="addresses or search terms to open")
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
     parser.add_argument("--debug", action="store_true", help="verbose logging")
+    parser.add_argument("--profile", default="", metavar="NAME",
+                        help="use a separate named profile (own settings, history, cookies, storage)")
     # Unknown options are passed to Qt/Chromium (e.g. --remote-debugging-port=9222).
     args, _ = parser.parse_known_args(argv)
     return args
@@ -80,8 +84,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     # A crash inside Qt then prints the Python stack instead of a bare "segmentation fault".
     faulthandler.enable()
     try:
-        app, window, ctx = build(argv, AppPaths.default())
-    except StartupError as exc:
+        app, window, ctx = build(argv, AppPaths.default(args.profile))
+    except (StartupError, ValueError) as exc:
         print(f"lilx: {exc}", file=sys.stderr)
         return 1
 
@@ -93,7 +97,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     window.show()
     log.info("lilx %s started (data: %s)", __version__, ctx.paths.data_dir)
 
-    _install_signal_handlers(app, window)
+    _install_signal_handlers(app)
     exit_code = app.exec()
     shutdown(window, ctx)
     if ctx.reset_requested:
@@ -163,10 +167,10 @@ def _request_reset(ctx: BrowserContext) -> None:
     QTimer.singleShot(200, QApplication.closeAllWindows)
 
 
-def _install_signal_handlers(app: QApplication, window: MainWindow) -> None:
-    """Ctrl+C / SIGTERM close the window normally, so forget-on-close cleanup still runs."""
+def _install_signal_handlers(app: QApplication) -> None:
+    """Ctrl+C / SIGTERM close all windows normally, so forget-on-close cleanup still runs."""
     def request_close(*_: object) -> None:
-        window.close()
+        QApplication.closeAllWindows()
 
     signal.signal(signal.SIGINT, request_close)
     signal.signal(signal.SIGTERM, request_close)
@@ -244,13 +248,14 @@ def build(argv: list[str], paths: AppPaths) -> tuple[QApplication, MainWindow, B
     lilblock = LilBlock(settings, storage, paths.filters_dir)
     profile.setUrlRequestInterceptor(ProfileBlocker(lilblock, profile))
     bookmarks = BookmarkStore(storage)
+    permissions = PermissionService(settings)
     # Same profile as every tab: extensions see and act on the user's normal browsing.
     extensions = ExtensionService(profile, storage)
 
     ctx = BrowserContext(
         paths=paths, storage=storage, settings=settings, history=history,
         downloads=downloads, profile=profile, data=data, lilblock=lilblock, bookmarks=bookmarks,
-        extensions=extensions,
+        extensions=extensions, permissions=permissions,
     )
     api = InternalApi(
         paths=paths, storage=storage, settings=settings, history=history, downloads=downloads,
@@ -258,23 +263,37 @@ def build(argv: list[str], paths: AppPaths) -> tuple[QApplication, MainWindow, B
         choose_extension=lambda kind: _choose_extension(ctx, kind), request_reset=lambda: _request_reset(ctx),
         choose_download_dir=lambda: _choose_download_dir(ctx),
     )
-    scheme_handler = LilxSchemeHandler(
-        api,
-        theme=lambda: resolve_theme(settings.current.theme),
-        language=lambda: resolve_language(settings.current.language),
-        theme_css=lambda: page_css(settings.current.theme, settings.current.accent_mode, settings.current.accent_color),
-        parent=app,
-    )
-    profile.installUrlSchemeHandler(SCHEME_BYTES, scheme_handler)
+
+    def scheme_handler(private: bool, parent: object) -> LilxSchemeHandler:
+        return LilxSchemeHandler(
+            api,
+            theme=lambda: resolve_theme(settings.current.theme),
+            language=lambda: resolve_language(settings.current.language),
+            theme_css=lambda: page_css(settings.current.theme, settings.current.accent_mode,
+                                       settings.current.accent_color),
+            parent=parent,
+            private=private,
+        )
+
+    ctx.scheme_handler_factory = scheme_handler
+    profile.installUrlSchemeHandler(SCHEME_BYTES, scheme_handler(False, app))
     app.setWindowIcon(app_icon())  # logo.png: windows, Dock, Cmd/Alt+Tab, taskbars
 
-    return app, MainWindow(ctx), ctx
+    ctx.windows = WindowManager(ctx)
+    return app, ctx.windows.create_window(private=False), ctx
 
 
 def shutdown(window: MainWindow, ctx: BrowserContext) -> None:
+    # "Forget sites on close" needs the running profile (cookie store) to delete cookies.
+    try:
+        ctx.data.forget_sites_on_close()
+    except Exception:
+        log.exception("Forget-on-close cleanup failed")
     ctx.downloads.save()
     ctx.lilblock.log.save()
-    # Delete views/pages before the profile, otherwise Chromium keeps the profile alive.
+    # Delete views/pages before their profiles, otherwise Chromium keeps a profile alive.
+    if ctx.windows is not None:
+        ctx.windows.delete_all()  # every window, then the private (off-the-record) profile
     if shiboken6.isValid(window):
         shiboken6.delete(window)
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)  # tab views

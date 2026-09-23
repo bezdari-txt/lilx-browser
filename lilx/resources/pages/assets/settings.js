@@ -66,6 +66,62 @@
     controls.selects[key] = select;
   }
 
+  // ---------- site permissions ----------
+  const PERM_VALUES = ["ask", "allow", "block"];
+
+  function buildPermissionDefaults() {
+    const box = $("permission-defaults");
+    box.replaceChildren();
+    for (const kind of state.permission_kinds) {
+      const name = `perm_${kind}`;
+      const inputs = {};
+      const group = h("div", { class: "segmented small", role: "radiogroup", "aria-label": t(`perm.kind_${kind}`) },
+        PERM_VALUES.map((value) => {
+          const input = h("input", {
+            type: "radio", name, value,
+            onchange: () => call("settings.permission_default", { kind, value }, t("settings.saved")),
+          });
+          inputs[value] = input;
+          return h("label", {}, input, t(`perm.${value}`));
+        }));
+      controls.segments[name] = inputs;
+      box.append(h("div", { class: "setting perm-row", dataset: { search: searchText(`perm.kind_${kind}`, "perm.title") } },
+        h("div", {}, h("div", { class: "label" }, t(`perm.kind_${kind}`)),
+          h("div", { class: "desc" }, t(`perm.desc_${kind}`))),
+        group));
+    }
+  }
+
+  function renderSitePermissions() {
+    const defaults = state.settings.permission_defaults;
+    const sites = Object.entries(state.settings.site_permissions).sort(([a], [b]) => a.localeCompare(b));
+    $("reset-site-permissions").disabled = !sites.length;
+    if (!sites.length) {
+      $("site-permissions").replaceChildren(h("div", { class: "empty small" }, t("perm.no_sites")));
+      return;
+    }
+    $("site-permissions").replaceChildren(...sites.map(([origin, rules]) =>
+      h("div", { class: "perm-site" },
+        h("div", { class: "perm-site-head" },
+          h("span", { class: "title" }, origin),
+          h("button", { class: "ghost small", type: "button",
+                        onclick: () => call("settings.site_permissions_clear", { origin }, t("perm.site_cleared")) },
+            t("perm.remove_site"))),
+        ...Object.entries(rules).sort().map(([kind, value]) => {
+          const select = h("select", {
+            "aria-label": t(`perm.kind_${kind}`),
+            onchange: (e) => call("settings.site_permission_set", { origin, kind, value: e.target.value }, t("settings.saved")),
+          }, ["allow", "block"].map((v) => h("option", { value: v }, t(`perm.${v}`))));
+          select.value = value;
+          return h("div", { class: "perm-rule" },
+            h("span", { class: "grow" }, t(`perm.kind_${kind}`)),
+            defaults[kind] === "block" ? h("span", { class: "badge warn" }, t("perm.blocked_globally")) : null,
+            select,
+            h("button", { class: "ghost icon", type: "button", title: t("perm.remove_rule"), "aria-label": t("perm.remove_rule"),
+                          onclick: () => call("settings.site_permission_remove", { origin, kind }) }, "✕"));
+        }))));
+  }
+
   function build() {
     buildSegmented("languages", "language", Object.entries(state.languages), (value) => set("language", value));
     buildSegmented("engines", "engine", state.engines.map((e) => [e.id, e.name]),
@@ -77,6 +133,7 @@
     buildAccentEditor();
     for (const [key, label, desc] of TOGGLES) buildToggle($("privacy-toggles"), key, label, desc);
     buildToggle($("lilblock-toggle"), "adblock_enabled", "lilblock.enable", null);
+    buildPermissionDefaults();
 
     buildToggle($("home-toggles"), "show_home_bookmarks", "home.show_bookmarks", "home.show_bookmarks_desc");
     buildToggle($("home-toggles"), "show_top_sites", "home.show_top", "home.show_top_desc");
@@ -260,6 +317,10 @@
       ? lb.log.recent.slice(0, 12).map(recentRow) : [emptyRow("lilblock.empty_history")]));
     $("clear-block-log").disabled = !lb.log.total && !lb.log.recent.length;
 
+    // site permissions
+    for (const kind of state.permission_kinds) check(`perm_${kind}`, s.permission_defaults[kind]);
+    renderSitePermissions();
+
     // home page
     const hidden = s.top_sites_hidden;
     $("hidden-sites-desc").textContent = hidden.length ? hidden.join(", ") : t("homecard.hidden_none");
@@ -284,6 +345,9 @@
   }
 
   // ---------- forms and buttons ----------
+  lilx.confirmClick($("reset-site-permissions"),
+    () => call("settings.site_permissions_reset", {}, t("perm.reset_done")));
+
   $("restore-top-sites").addEventListener("click",
     () => call("settings.top_sites_restore", {}, t("homecard.restored")));
 

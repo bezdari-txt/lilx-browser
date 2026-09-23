@@ -24,7 +24,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # Checks count tabs right after closing them; skip the close animation.
 os.environ.setdefault("LILX_NO_ANIMATIONS", "1")
+# Virtual camera/microphone so media permission requests can be exercised headless.
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+                                          + " --use-fake-device-for-media-stream").strip()
 
+import shiboken6  # noqa: E402
 from PySide6.QtCore import QEventLoop, QUrl  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -34,12 +38,30 @@ from lilx.core.settings import SiteRule  # noqa: E402
 from lilx.paths import AppPaths  # noqa: E402
 
 PAYLOAD = os.urandom(256 * 1024)
+SLOW_PAYLOAD = os.urandom(6 * 1024 * 1024)
 REQUESTS: list[tuple[str, dict[str, str]]] = []  # (path, headers) seen by the test server
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         REQUESTS.append((self.path, dict(self.headers)))
+        if self.path.startswith("/slow.bin"):  # ~3 s download, so it can be paused and cancelled
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="slow.bin"')
+            self.send_header("Content-Length", str(len(SLOW_PAYLOAD)))
+            self.end_headers()
+            try:
+                for start in range(0, len(SLOW_PAYLOAD), 65536):
+                    self.wfile.write(SLOW_PAYLOAD[start:start + 65536])
+                    self.wfile.flush()
+                    time.sleep(0.05)
+            except OSError:
+                pass  # the browser cancelled the download
+            return
+        if self.path.startswith("/page"):  # plain page for windows / permission checks
+            self._send(b"<!doctype html><title>Page</title><input id=i>page", "text/html; charset=utf-8")
+            return
         if self.path.startswith("/ads"):
             if self.path.startswith("/adsbygoogle.js"):
                 self._send(b"window.adLoaded = true;", "text/javascript")
@@ -445,6 +467,240 @@ def main() -> int:
     install(fixture)  # left installed: the restart check in the reset section needs one
     s.wait(lambda: len(ctx.extensions.installed()) == 1, 10)
 
+    print("windows")
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeySequence
+    from PySide6.QtTest import QTest
+
+    mac = sys.platform == "darwin"
+    s.check("Control+N shortcut (physical Control key)", window._actions["new_window"].shortcut()  # noqa: SLF001
+            == QKeySequence("Meta+N" if mac else "Ctrl+N"))
+    s.check("Control+Shift+N shortcut", window._actions["new_private_window"].shortcut()  # noqa: SLF001
+            == QKeySequence("Meta+Shift+N" if mac else "Ctrl+Shift+N"))
+    control = Qt.KeyboardModifier.MetaModifier if mac else Qt.KeyboardModifier.ControlModifier
+    before = len(ctx.windows.windows)
+    window.activateWindow()
+    s.wait(lambda: False, 0.3)
+    QTest.keyClick(window, Qt.Key.Key_N, control)
+    s.check("Control+N opens a normal window", s.wait(lambda: len(ctx.windows.windows) == before + 1, 5),
+            str(len(ctx.windows.windows)))
+    normal2 = ctx.windows.windows[-1]
+    s.check("new window is normal and shares the profile", not normal2.private and normal2._profile is ctx.profile)  # noqa: SLF001
+    normal2.activateWindow()
+    s.wait(lambda: False, 0.3)
+    QTest.keyClick(normal2, Qt.Key.Key_N, control | Qt.KeyboardModifier.ShiftModifier)
+    s.check("Control+Shift+N opens a private window", s.wait(lambda: len(ctx.windows.windows) == before + 2, 5))
+    private = ctx.windows.windows[-1]
+    private_profile = private._profile  # noqa: SLF001
+    s.check("private window uses an off-the-record profile",
+            private.private and private_profile.isOffTheRecord() and private_profile is not ctx.profile)
+    badge = private._nav.private_badge  # noqa: SLF001
+    s.check("private window is marked", badge.isVisibleTo(private) and "(" in private.windowTitle(),
+            f"badge={badge.isVisibleTo(private)} title={private.windowTitle()!r}")
+    s.check("normal window is not marked", not normal2._nav.private_badge.isVisibleTo(normal2))  # noqa: SLF001
+    private2 = ctx.windows.open_window(private=True)
+    s.check("private windows share one private session", private2._profile is private_profile)  # noqa: SLF001
+
+    # cookies / storage isolation and no history from private windows
+    history_before = ctx.history.count()
+    pview = private.current_view()
+    s.load(pview, f"http://{base}/page?private-visit")
+    s.js(pview, "document.cookie = 'privateonly=1; path=/'; localStorage.setItem('where', 'private')")
+    nview = normal2.current_view()
+    s.load(nview, f"http://{base}/page?normal-visit")
+    s.js(nview, "document.cookie = 'normalonly=1; path=/'; localStorage.setItem('where', 'normal')")
+    s.load(pview, f"http://{base}/page?private-again")
+    s.load(nview, f"http://{base}/page?normal-again")
+    p_cookies, n_cookies = s.js(pview, "document.cookie"), s.js(nview, "document.cookie")
+    s.check("private cookies isolated from normal", "normalonly" not in p_cookies and "privateonly" in p_cookies, p_cookies)
+    s.check("normal cookies isolated from private", "privateonly" not in n_cookies and "normalonly" in n_cookies, n_cookies)
+    s.check("localStorage isolated", s.js(pview, "localStorage.getItem('where')") == "private"
+            and s.js(nview, "localStorage.getItem('where')") == "normal")
+    s.check("private visits are not added to history",
+            not any("private" in e.url for e in ctx.history.search("private")), str([e.url for e in ctx.history.search("private")]))
+    s.check("normal window still records history", s.wait(lambda: ctx.history.count() > history_before, 5))
+    private.close()
+    s.wait(lambda: False, 0.5)
+    s.check("session stays while a private window is open", ctx.windows.private_session_active)
+    private2.close()
+    s.check("private session ends with the last private window",
+            s.wait(lambda: not ctx.windows.private_session_active, 5))
+    fresh = ctx.windows.open_window(private=True)
+    fview = fresh.current_view()
+    s.load(fview, f"http://{base}/page?fresh")
+    s.check("a new private session starts empty", "privateonly" not in (s.js(fview, "document.cookie") or ""),
+            str(s.js(fview, "document.cookie")))
+    fresh.close()
+    s.wait(lambda: not ctx.windows.private_session_active, 5)
+    normal2.close()
+    s.wait(lambda: len(ctx.windows.windows) == before, 5)
+
+    print("site permissions")
+    origin = f"http://{base}"
+    notify = "Notification.requestPermission()"
+    bar = window._permission_bar  # noqa: SLF001
+
+    def ask(win: Any, code: str = notify, path: str = "page") -> Any:
+        v = win.current_view()
+        s.load(v, f"http://{base}/{path}?{time.monotonic()}")
+        s.js(v, "document.getElementById('i').focus()")
+        return s.js_async(v, code)
+
+    def ask_async(win: Any, code: str, path: str = "page") -> Any:
+        v = win.current_view()
+        s.load(v, f"http://{base}/{path}?{time.monotonic()}")
+        s.js(v, "window.__perm = undefined; Promise.resolve().then(() => " + code + ")"
+                ".then(r => window.__perm = 'ok:' + r, e => window.__perm = 'err:' + e.name)")
+        return v
+
+    def perm_result(v: Any) -> Any:
+        s.wait(lambda: (s.js(v, "String(window.__perm)") or "undefined") != "undefined", 5)
+        return s.js(v, "String(window.__perm)")
+
+    window.activateWindow()
+    v = ask_async(window, notify)
+    s.check("Ask: prompt shown with the requesting origin", s.wait(lambda: bar.current_request() is not None, 5)
+            and origin in bar._text.text(), bar._text.text())  # noqa: SLF001
+    bar._allow.click()  # noqa: SLF001
+    s.check("Ask: allowed from the prompt", perm_result(v) == "ok:granted", str(perm_result(v)))
+    s.check("remembered decision stored for the origin",
+            ctx.settings.current.site_permissions.get(origin) == {"notifications": "allow"},
+            str(ctx.settings.current.site_permissions))
+    v = ask_async(window, notify)
+    s.check("per-site Allow: no prompt next time", perm_result(v) == "ok:granted" and bar.current_request() is None)
+    ctx.settings.set_permission_default("notifications", "block")
+    v = ask_async(window, notify)
+    s.check("global Block wins over the site's Allow, without prompt",
+            perm_result(v) == "ok:denied" and bar.current_request() is None, str(perm_result(v)))
+    ctx.settings.set_permission_default("notifications", "allow")
+    ctx.settings.set_site_permission(origin, "notifications", "block")
+    v = ask_async(window, notify)
+    s.check("per-site Block beats global Allow", perm_result(v) == "ok:denied")
+    ctx.settings.remove_site_permission(origin, "notifications")
+    v = ask_async(window, notify)
+    s.check("global Allow after removing the site rule", perm_result(v) == "ok:granted" and bar.current_request() is None)
+    ctx.settings.set_permission_default("notifications", "ask")
+    ctx.settings.set_permission_default("camera", "ask")
+    v = ask_async(window, "navigator.mediaDevices.getUserMedia({video: true}).then(() => 'stream')")
+    s.check("camera prompt", s.wait(lambda: bar.current_request() is not None, 5)
+            and "camera" in bar.current_request().kinds, bar._text.text())  # noqa: SLF001
+    bar._remember.setChecked(False)  # noqa: SLF001
+    bar._block.click()  # noqa: SLF001
+    s.check("camera blocked from the prompt", (perm_result(v) or "").startswith("err:"), str(perm_result(v)))
+    s.check("unremembered decision is not stored", "camera" not in ctx.settings.current.site_permissions.get(origin, {}))
+    bar._remember.setChecked(True)  # noqa: SLF001
+    ctx.settings.set_permission_default("geolocation", "block")
+    v = ask_async(window, "new Promise((ok, no) => navigator.geolocation.getCurrentPosition(() => ok('pos'), e => no({name: 'geo' + e.code})))")
+    s.check("geolocation globally blocked: denied without prompt",
+            perm_result(v) == "err:geo1" and bar.current_request() is None, str(perm_result(v)))
+
+    # settings page: remove site / reset
+    ctx.settings.set_site_permission(origin, "camera", "allow")
+    ctx.settings.set_site_permission("https://meet.example.org", "microphone", "allow")
+    s.load(view, "lilx://settings/")
+    s.wait(lambda: (s.js(view, "document.querySelectorAll('.perm-site').length") or 0) == 2, 5)
+    s.check("settings list sites with rules", s.js(view, "document.querySelectorAll('.perm-site').length") == 2)
+    s.js(view, "document.querySelector('.perm-site .perm-site-head button').click()")
+    s.check("remove all rules of one site from settings", s.wait(lambda: len(ctx.settings.current.site_permissions) == 1, 5),
+            str(ctx.settings.current.site_permissions))
+    s.js(view, "{ const b = document.getElementById('reset-site-permissions'); b.click(); b.click(); }")
+    s.check("reset all site permissions", s.wait(lambda: ctx.settings.current.site_permissions == {}, 5))
+    s.js(view, "document.querySelector('#permission-defaults input[name=perm_geolocation][value=ask]').click()")
+    s.check("global default changed from settings", s.wait(
+        lambda: ctx.settings.current.permission_defaults["geolocation"] == "ask", 5))
+
+    # private window: decisions stay in memory
+    pwin = ctx.windows.open_window(private=True)
+    pbar = pwin._permission_bar  # noqa: SLF001
+    pwin.activateWindow()
+    v = ask_async(pwin, notify)
+    s.check("private window: prompt says it is remembered only for the session",
+            s.wait(lambda: pbar.current_request() is not None, 5) and pbar.current_request().private)
+    pbar._allow.click()  # noqa: SLF001
+    s.check("private window: allowed", perm_result(v) == "ok:granted")
+    s.check("private decision not written to settings", origin not in ctx.settings.current.site_permissions
+            and origin.encode() not in (paths.data_dir / "settings.json").read_bytes())
+    v = ask_async(pwin, notify)
+    s.check("private decision reused within the session", perm_result(v) == "ok:granted" and pbar.current_request() is None)
+    ctx.settings.set_permission_default("notifications", "block")
+    v = ask_async(pwin, notify)
+    s.check("private windows respect a global Block", perm_result(v) == "ok:denied")
+    ctx.settings.set_permission_default("notifications", "ask")
+    pwin.close()
+    s.wait(lambda: not ctx.windows.private_session_active, 5)
+    pwin = ctx.windows.open_window(private=True)
+    pbar = pwin._permission_bar  # noqa: SLF001
+    pwin.activateWindow()
+    v = ask_async(pwin, notify)
+    s.check("private decisions are gone after the session", s.wait(lambda: pbar.current_request() is not None, 5))
+    pbar._block.click()  # noqa: SLF001
+    perm_result(v)
+    pwin.close()
+    s.wait(lambda: not ctx.windows.private_session_active, 5)
+    window.activateWindow()
+
+    print("download controls")
+    ctx.settings.set("download_dir", str(downloads_dir))
+
+    def slow_download() -> Any:
+        count = len(ctx.downloads.records())
+        view.load(QUrl(f"http://{base}/slow.bin?{time.monotonic()}"))
+        s.wait(lambda: len(ctx.downloads.records()) > count and ctx.downloads.records()[0].received > 0, 10)
+        return ctx.downloads.records()[0]
+
+    s.load(view, "lilx://downloads/")  # the download is started from another tab
+    work = window.new_tab(QUrl("about:blank"), background=True)
+
+    def slow_download() -> Any:
+        count = len(ctx.downloads.records())
+        work.load(QUrl(f"http://{base}/slow.bin?{time.monotonic()}"))
+        s.wait(lambda: len(ctx.downloads.records()) > count and ctx.downloads.records()[0].received > 0, 10)
+        return ctx.downloads.records()[0]
+
+    record = slow_download()
+    row = "document.querySelector('#items .list-item')"
+    s.wait(lambda: (s.js(view, f"{row} ? {row}.textContent : ''") or "").count(".bin") > 0, 5)
+    s.js(view, f"{row}.querySelector('[data-action=\"downloads.pause\"]').click()")
+    s.check("Pause", s.wait(lambda: record.paused, 5), record.state)
+    held = record.received
+    s.wait(lambda: False, 1.0)
+    s.check("paused download does not grow", record.received == held and record.state == "in_progress",
+            f"{held} -> {record.received}")
+    def row_says(key: str) -> bool:  # the page's own translation, whatever the UI language
+        return s.js(view, f"{row}.textContent.includes(lilx.t('{key}'))") is True
+
+    s.check("UI shows Paused", s.wait(lambda: row_says("downloads.paused"), 5), str(s.js(view, f"{row}.textContent")))
+    s.check("partial data kept while paused", (downloads_dir / f"{record.file_name}.download").exists()
+            or (downloads_dir / record.file_name).exists())
+    s.js(view, f"{row}.querySelector('[data-action=\"downloads.resume\"]').click()")
+    s.check("Resume continues the same download", s.wait(lambda: not record.paused, 5)
+            and len([r for r in ctx.downloads.records() if r.file_name.startswith("slow")]) == 1)
+    s.check("resumed download completes", s.wait(lambda: record.state == "completed", 30), record.state)
+    s.check("completed file is intact", (downloads_dir / record.file_name).read_bytes() == SLOW_PAYLOAD)
+    s.check("UI shows the completed download", s.wait(lambda: s.js(view, f"!!{row}.querySelector('[data-action=\"downloads.open\"]')") is True, 5))
+    record2 = slow_download()
+    ctx.downloads.pause(record2.id)
+    s.wait(lambda: record2.paused, 5)
+    ctx.downloads.cancel(record2.id)
+    s.check("Cancel", s.wait(lambda: record2.state == "cancelled", 5), record2.state)
+    s.check("no partial file left after cancel", s.wait(lambda: not (downloads_dir / f"{record2.file_name}.download").exists()
+            and not (downloads_dir / record2.file_name).exists(), 5), str(sorted(p.name for p in downloads_dir.iterdir())))
+    s.check("UI shows Cancelled", s.wait(lambda: row_says("downloads.cancelled"), 5), str(s.js(view, f"{row}.textContent")))
+    pwin = ctx.windows.open_window(private=True)
+    count = len(ctx.downloads.records())
+    pwin.current_view().load(QUrl(f"http://{base}/file.bin?private"))
+    s.wait(lambda: len(ctx.downloads.records()) > count and ctx.downloads.records()[0].state == "completed", 10)
+    private_record = ctx.downloads.records()[0]
+    s.check("private download marked private", private_record.private)
+    ctx.downloads.save()
+    s.check("private download not written to the download list",
+            private_record.id not in (paths.data_dir / "downloads.json").read_text())
+    pwin.close()
+    s.wait(lambda: not ctx.windows.private_session_active, 5)
+    s.check("private download entry forgotten, file kept", s.wait(
+        lambda: all(r.id != private_record.id for r in ctx.downloads.records()), 5) and private_record.path.exists())
+    window._tabs.setCurrentIndex(0)  # noqa: SLF001
+
     print("tabs")
     before = window._tabs.count()  # noqa: SLF001
     extra = window.new_tab(QUrl(f"http://{base}/second"))
@@ -504,7 +760,8 @@ def main() -> int:
     s.check("no reset before the third press", not ctx.reset_requested)
     s.js(view, "document.getElementById('reset-button').click()")
     s.check("third press requests reset", s.wait(lambda: ctx.reset_requested, 5))
-    s.check("window closes for reset", s.wait(lambda: not window.isVisible(), 5))
+    # Windows are deleted when closed (WA_DeleteOnClose).
+    s.check("window closes for reset", s.wait(lambda: not shiboken6.isValid(window) or not window.isVisible(), 5))
     shutdown(window, ctx)
 
     print("forget on close")
@@ -529,7 +786,12 @@ def main() -> int:
     s.check("downloaded files kept", target.exists())
 
     server.shutdown()
+    # nothing of the private sessions reached the normal profile on disk
+    cookie_files = [p for p in paths.webengine_dir.rglob("Cookies") if p.is_file()]
+    leaked = [p for p in cookie_files if b"privateonly" in p.read_bytes()]
+    s.check("private cookies never written to the normal profile", not leaked, str(leaked))
     print(f"\n{'FAILED: ' + ', '.join(s.failures) if s.failures else 'all smoke checks passed'}")
+    tmp.cleanup()  # temporary profile, downloads and HOME-less data of this run
     return 1 if s.failures else 0
 
 

@@ -14,7 +14,8 @@ lilx/
 │   ├── settings.py      Settings model, validation, SettingsManager
 │   ├── search.py        search engines, address-bar input resolution
 │   ├── history.py       HistoryStore (SQLite)
-│   ├── downloads.py     DownloadManager (QWebEngineDownloadRequest)
+│   ├── downloads.py     DownloadManager (QWebEngineDownloadRequest; pause/resume/cancel)
+│   ├── permissions.py   site permission rules: origins, Ask/Allow/Block resolution
 │   ├── hosts.py         host normalization / matching for site rules
 │   ├── privacy.py       offline per-site cleanup (engine not running)
 │   ├── adblock.py       lilBlock filter engine (Adblock Plus network rules)
@@ -22,15 +23,18 @@ lilx/
 │   ├── secrets.py       SecretStore interface (OS keychain) — not implemented
 │   └── network.py       NetworkMode (direct; Tor planned) — the Tor seam
 ├── engine/              Qt WebEngine integration
-│   ├── profile.py       persistent profile, privacy attributes, GPC/DNT interceptor
-│   ├── page.py          BrowserPage: popups → tabs, permission policy, lilx:// guard
+│   ├── profile.py       persistent + off-the-record profiles, privacy attributes
+│   ├── page.py          BrowserPage: popups → tabs, permission requests, lilx:// guard
+│   ├── permissions.py   PermissionService: answers QWebEnginePermission from the rules
 │   ├── scheme.py        lilx:// scheme handler (pages, assets, API)
 │   ├── api.py           JSON API for internal pages
 │   ├── lilblock.py      lilBlock service, per-page interceptor, block history
 │   ├── extensions.py    ExtensionService over QWebEngineExtensionManager (MV3)
 │   └── browser_data.py  runtime data management (clear data, forget sites)
 ├── ui/                  browser chrome (widgets)
-│   ├── main_window.py   tabs + navigation + web view stack
+│   ├── main_window.py   tabs + navigation + web view stack (normal or private window)
+│   ├── windows.py       WindowManager, PrivateSession (shared off-the-record profile)
+│   ├── permission_bar.py  in-window permission prompt
 │   ├── tab_bar.py, navigation_bar.py, browser_view.py, overlays.py
 │   ├── animations.py    fading buttons, animated menus, fades (short, optional)
 │   ├── theme.py         palettes + Qt stylesheet
@@ -85,6 +89,38 @@ components, which are hidden. Non-MV3 folders are rejected before install, non-M
 .zips right after Qt unpacks them. The action popup (`actionPopupUrl()`) is shown by
 `ui/extension_popup.py` in a `QWebEngineView` on the same profile.
 
+## Windows and profiles
+
+`ui/windows.WindowManager` owns all windows (Control+N: normal, Control+Shift+N:
+private; on macOS the physical Control key, `Meta` in Qt). Normal windows share the
+persistent profile and all services. Private windows share one `PrivateSession`: an
+off-the-record profile from `QWebEngineProfileBuilder.createOffTheRecordProfile()` with
+the same privacy configuration, its own `lilx://` handler (pages get
+`data-private="1"`) and a lilBlock interceptor that records nothing. Private windows
+never write history; their download entries and permission decisions stay in memory.
+When the last private window is destroyed the profile is deleted, so cookies, storage,
+cache and session data of the private session are gone; the next private window starts
+a fresh session. Extensions run in the normal profile only.
+
+Named profiles: `lilx --profile NAME` uses a complete, separate data directory
+(`<data dir>/profiles/NAME`: settings, history, bookmarks, cookies, storage).
+
+## Site permissions
+
+Camera, microphone, location, notifications and clipboard (Qt has one permission for
+clipboard read and write). `core/permissions.py` resolves a request for an origin
+(`scheme://host[:port]`, exact match: no subdomains, http and https separate):
+global Block (hard, no prompt) → site rule (allow/block) → global default (ask/allow).
+Rules live in settings (`permission_defaults`, `site_permissions`).
+
+Profiles use `PersistentPermissionsPolicy.AskEveryTime`, so Qt stores nothing.
+Chromium still caches an answer within a tab for the same origin until the permission
+is `reset()`; `BrowserPage` therefore resets its answers on navigation and when the
+rules change (`PermissionService.rules_changed`), which makes a new global Block apply
+to open tabs at once. "Ask" requests wait in the page and are shown by
+`ui/permission_bar.PermissionBar` with the requesting origin; "remember" stores a site
+rule (persistent in normal windows, in memory for the private session).
+
 ## Language
 
 `Settings.language` is `""` (follow the system locale) until the user picks
@@ -109,7 +145,7 @@ A rule for `example.com` also covers its subdomains.
 
 | Data | How it is removed |
 |---|---|
-| History | `HistoryStore.delete_host` when the window closes |
+| History | `HistoryStore.delete_host` when lilx quits |
 | Cookies | through the engine (`QWebEngineCookieStore.deleteCookie`) on close, and again in the `Cookies` SQLite file after the profile is destroyed (also at startup, which covers crashes) |
 | IndexedDB | per-origin directories removed while the engine is stopped |
 | Local Storage, Service Worker / Cache Storage | **not yet**: Chromium keeps them in shared LevelDB databases; needs a LevelDB-aware cleaner |
@@ -158,5 +194,6 @@ profile explicitly so a second context with a different profile can be created.
 1. register `lilx://` (before `QApplication`)
 2. offline cleanup of forgotten sites (before the profile opens its files)
 3. profile → services → window
-4. on close: runtime cleanup → delete views/pages → delete profile (Chromium flushes)
+4. on quit: runtime forget-on-close cleanup → delete all windows (views/pages) → delete
+   the private profile → delete the normal profile (Chromium flushes)
    → offline cleanup again

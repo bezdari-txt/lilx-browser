@@ -17,9 +17,13 @@
     }
   });
 
+  const isPrivate = document.documentElement.dataset.private === "1";
+  document.getElementById("private-note").hidden = !isPrivate;
+
   function renderTiles(sites) {
     const tiles = document.getElementById("tiles");
-    document.getElementById("top-section").hidden = !sites.length;
+    // A private window does not show what was browsed normally.
+    document.getElementById("top-section").hidden = isPrivate || !sites.length;
     tiles.replaceChildren(...sites.map((site) =>
       h("div", { class: "tile-wrap" },
         h("a", { class: "tile", href: site.url, title: site.title || site.host },
@@ -109,7 +113,9 @@
         p.lilblock_enabled ? t("home.lilblock_on", { n: p.lilblock_total }) : t("home.lilblock_off")),
       badge(p.third_party_cookies_blocked, t(p.third_party_cookies_blocked ? "home.tp_blocked" : "home.tp_allowed")),
       badge(p.privacy_signals, t(p.privacy_signals ? "home.gpc_on" : "home.gpc_off")),
-      badge(!p.history_enabled, t(p.history_enabled ? "home.history_on" : "home.history_off")),
+      isPrivate
+        ? badge(true, t("home.history_private"))
+        : badge(!p.history_enabled, t(p.history_enabled ? "home.history_on" : "home.history_off")),
     ];
     if (p.forget_on_close) badges.push(badge(true, t("home.forget", { n: p.forget_on_close })));
     document.getElementById("privacy").replaceChildren(...badges);

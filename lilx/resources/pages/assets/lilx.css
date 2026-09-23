@@ -541,3 +541,21 @@ a.button:hover { background: var(--hover); text-decoration: none; }
 .error-row .sub { color: var(--text); font-size: 13px; word-break: break-word; }
 .error-row .time { color: var(--muted); font-size: 12px; width: 44px; flex: none; }
 .center-hint { text-align: center; }
+
+/* ---------- site permissions ---------- */
+.segmented.small { flex-wrap: nowrap; gap: 4px; }
+.segmented.small label { flex: 0 0 auto; padding: 5px 12px; font-size: 13px; }
+.perm-row .segmented { flex: none; }
+.perm-site { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin-top: 10px; }
+.perm-site-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.perm-site-head .title { font-weight: 600; font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+.perm-rule { display: flex; align-items: center; gap: 10px; padding: 6px 0 0; }
+.perm-rule select { min-width: 120px; }
+
+/* ---------- private windows / paused downloads ---------- */
+.private-note {
+  margin: 20px auto 0; max-width: 520px; padding: 10px 14px; border-radius: var(--radius-sm);
+  background: var(--accent-soft); color: var(--text); font-size: 13px;
+}
+.private-badge { margin-left: 8px; color: var(--accent); background: var(--accent-soft); }
+.progress.paused > div { background: var(--muted); }

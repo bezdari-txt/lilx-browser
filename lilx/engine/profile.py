@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import re
 
+import shiboken6
+
 from PySide6.QtCore import QObject
 from PySide6.QtWebEngineCore import (
     QWebEngineCookieStore,
@@ -42,15 +44,31 @@ def _block_third_party(request: QWebEngineCookieStore.FilterRequest) -> bool:
 
 
 def create_profile(paths: AppPaths, settings: SettingsManager) -> QWebEngineProfile:
+    """The normal, persistent profile (cookies, storage and cache on disk)."""
     builder = QWebEngineProfileBuilder()
     builder.setPersistentStoragePath(str(paths.webengine_dir))
     builder.setCachePath(str(paths.webengine_cache_dir))
     builder.setHttpCacheType(QWebEngineProfile.HttpCacheType.DiskHttpCache)
     builder.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
-    # Site permissions (camera, location, ...) are never written to disk.
+    # Site permissions (camera, location, ...) are never stored by Qt: lilx decides every request.
     builder.setPersistentPermissionsPolicy(QWebEngineProfile.PersistentPermissionsPolicy.AskEveryTime)
-    profile = builder.createProfile(PROFILE_NAME)
+    return _configure(builder.createProfile(PROFILE_NAME), settings)
 
+
+def create_private_profile(settings: SettingsManager) -> QWebEngineProfile:
+    """Qt's off-the-record profile: cookies, storage, cache and history live only in memory.
+
+    Qt writes nothing for it to disk; everything disappears when the profile is deleted.
+    """
+    profile = QWebEngineProfileBuilder.createOffTheRecordProfile()
+    # Off-the-record profiles remember granted permissions in memory by default; lilx
+    # decides every request itself (private decisions: lilx.engine.permissions).
+    profile.setPersistentPermissionsPolicy(QWebEngineProfile.PersistentPermissionsPolicy.AskEveryTime)
+    return _configure(profile, settings)
+
+
+def _configure(profile: QWebEngineProfile, settings: SettingsManager) -> QWebEngineProfile:
+    """Privacy defaults shared by the normal and the private profile."""
     # The default user agent advertises "QtWebEngine/x.y", which makes lilx
     # easier to fingerprint and breaks some sites. Remove just that token.
     profile.setHttpUserAgent(_QTWEBENGINE_UA_TOKEN.sub("", profile.httpUserAgent()))
@@ -66,11 +84,16 @@ def create_profile(paths: AppPaths, settings: SettingsManager) -> QWebEngineProf
     web.setAttribute(_Attr.PluginsEnabled, True)  # needed by the built-in PDF viewer
     web.setAttribute(_Attr.PdfViewerEnabled, True)
     web.setAttribute(_Attr.LocalContentCanAccessFileUrls, False)
+    # Clipboard access goes through the "clipboard" site permission instead of these switches.
+    web.setAttribute(_Attr.JavascriptCanAccessClipboard, False)
+    web.setAttribute(_Attr.JavascriptCanPaste, False)
 
-    for family in (_Font.StandardFont, _Font.SansSerifFont, _Font.FixedFont):
-        _DEFAULT_FONTS[family] = web.fontFamily(family)
+    if not _DEFAULT_FONTS:
+        for family in (_Font.StandardFont, _Font.SansSerifFont, _Font.FixedFont):
+            _DEFAULT_FONTS[family] = web.fontFamily(family)
     apply_settings(profile, settings)
-    settings.changed.connect(lambda key: apply_settings(profile, settings))
+    # A private profile is deleted before the app ends: skip it then.
+    settings.changed.connect(lambda key: apply_settings(profile, settings) if shiboken6.isValid(profile) else None)
     return profile
 
 

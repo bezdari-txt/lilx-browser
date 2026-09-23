@@ -17,6 +17,9 @@ Keys = tuple["str | QKeySequence.StandardKey", ...]
 
 SHORTCUTS: dict[str, Keys] = {
     "new_tab": ("Ctrl+T",),
+    # The physical Control key everywhere: on macOS Qt calls it "Meta" ("Ctrl" there is Command).
+    "new_window": ("Meta+N",) if _MAC else ("Ctrl+N",),
+    "new_private_window": ("Meta+Shift+N",) if _MAC else ("Ctrl+Shift+N",),
     "close_tab": ("Ctrl+W", "Ctrl+F4") if not _MAC else ("Ctrl+W",),
     "reopen_tab": ("Ctrl+Shift+T",),
     "next_tab": ("Meta+Tab", "Ctrl+Alt+Right", "Ctrl+}") if _MAC else ("Ctrl+Tab", "Ctrl+PgDown"),

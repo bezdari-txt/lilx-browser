@@ -11,6 +11,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
+from lilx.core import permissions as perms
 from lilx.core.hosts import normalize_host
 from lilx.core.search import DEFAULT_ENGINE, ENGINES
 from lilx.core.storage import StorageBackend, StorageError
@@ -78,17 +79,22 @@ class Settings:
     forget_on_close: list[SiteRule] = field(default_factory=list)
     adblock_allowlist: list[str] = field(default_factory=list)  # sites where lilBlock is off
     top_sites_hidden: list[str] = field(default_factory=list)  # removed from "Frequently visited"
+    # site permissions: global default per kind (ask/allow/block) and per-origin rules (allow/block)
+    permission_defaults: dict[str, str] = field(default_factory=lambda: dict(perms.DEFAULTS))
+    site_permissions: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = dataclasses.asdict(self)
         data["forget_on_close"] = [rule.to_dict() for rule in self.forget_on_close]
         data["adblock_allowlist"] = list(self.adblock_allowlist)
         data["top_sites_hidden"] = list(self.top_sites_hidden)
+        data["permission_defaults"] = dict(self.permission_defaults)
+        data["site_permissions"] = {origin: dict(rules) for origin, rules in self.site_permissions.items()}
         return data
 
 
 # Keys that may be changed with SettingsManager.set(); site rules have dedicated methods.
-_LIST_KEYS = {"forget_on_close", "adblock_allowlist", "top_sites_hidden"}
+_LIST_KEYS = {"forget_on_close", "adblock_allowlist", "top_sites_hidden", "permission_defaults", "site_permissions"}
 _SIMPLE_KEYS = {f.name for f in dataclasses.fields(Settings)} - _LIST_KEYS
 
 
@@ -189,6 +195,9 @@ class SettingsManager(QObject):
         hidden = data.get("top_sites_hidden", [])
         if isinstance(hidden, list):
             settings.top_sites_hidden = sorted({h.strip().lower() for h in hidden if isinstance(h, str) and h.strip()})
+        # Older settings files have no permission fields: the safe defaults (ask) apply.
+        settings.permission_defaults = perms.clean_defaults(data.get("permission_defaults"))
+        settings.site_permissions = perms.clean_site_rules(data.get("site_permissions"))
         return settings
 
     def _backup_corrupted(self) -> None:
@@ -270,3 +279,46 @@ class SettingsManager(QObject):
             self._settings.top_sites_hidden = []
             self.save()
             self.changed.emit("top_sites_hidden")
+
+    # -- site permissions ---------------------------------------------------------------
+    def set_permission_default(self, kind: str, value: str) -> None:
+        perms.validate_default(kind, value)
+        if self._settings.permission_defaults.get(kind) != value:
+            self._settings.permission_defaults = {**self._settings.permission_defaults, kind: value}
+            self.save()
+            self.changed.emit("permissions")
+
+    def set_site_permission(self, origin: str, kind: str, value: str) -> str:
+        """Persistent rule for one origin. Returns the normalized origin."""
+        perms.validate_site_rule(kind, value)
+        origin = perms.normalize_origin(origin)
+        rules = {o: dict(r) for o, r in self._settings.site_permissions.items()}
+        rules.setdefault(origin, {})[kind] = value
+        self._settings.site_permissions = rules
+        self.save()
+        self.changed.emit("permissions")
+        return origin
+
+    def remove_site_permission(self, origin: str, kind: str) -> None:
+        origin = perms.normalize_origin(origin)
+        rules = {o: dict(r) for o, r in self._settings.site_permissions.items()}
+        if kind in rules.get(origin, {}):
+            del rules[origin][kind]
+            if not rules[origin]:
+                del rules[origin]
+            self._settings.site_permissions = rules
+            self.save()
+            self.changed.emit("permissions")
+
+    def clear_site_permissions(self, origin: str) -> None:
+        origin = perms.normalize_origin(origin)
+        if origin in self._settings.site_permissions:
+            self._settings.site_permissions = {o: r for o, r in self._settings.site_permissions.items() if o != origin}
+            self.save()
+            self.changed.emit("permissions")
+
+    def reset_site_permissions(self) -> None:
+        if self._settings.site_permissions:
+            self._settings.site_permissions = {}
+            self.save()
+            self.changed.emit("permissions")

@@ -50,6 +50,9 @@ class DownloadRecord:
     started_at: float = 0.0
     finished_at: float | None = None
     error: str = ""
+    paused: bool = False
+    #: started in a private window: kept in memory only, never written to downloads.json
+    private: bool = False
 
     @property
     def path(self) -> Path:
@@ -67,6 +70,7 @@ class DownloadRecord:
         if record.state == "in_progress":  # lilx was closed mid-download
             record.state = "interrupted"
             record.error = record.error or "lilx was closed"
+        record.paused = False
         return record
 
 
@@ -88,7 +92,7 @@ def unique_path(directory: Path, name: str) -> Path:
 
 class DownloadManager(QObject):
     changed = Signal()
-    started = Signal(str)  # file name
+    started = Signal(str, bool)  # file name, private
 
     def __init__(self, storage: StorageBackend, settings: SettingsManager, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -113,7 +117,8 @@ class DownloadManager(QObject):
             self._records[record.id] = record
 
     def save(self) -> None:
-        records = list(self._records.values())[-_MAX_RECORDS:]
+        # Downloads from private windows are never written (the files themselves stay).
+        records = [r for r in self._records.values() if not r.private][-_MAX_RECORDS:]
         try:
             self._storage.write_json(DOWNLOADS_DOCUMENT, [dataclasses.asdict(r) for r in records])
         except StorageError as exc:
@@ -126,7 +131,10 @@ class DownloadManager(QObject):
         directory.mkdir(parents=True, exist_ok=True)
         return directory
 
-    def handle_request(self, request: QWebEngineDownloadRequest) -> None:
+    def handle_private_request(self, request: QWebEngineDownloadRequest) -> None:
+        self.handle_request(request, private=True)
+
+    def handle_request(self, request: QWebEngineDownloadRequest, private: bool = False) -> None:
         try:
             directory = self.target_directory()
         except OSError as exc:
@@ -146,15 +154,17 @@ class DownloadManager(QObject):
             directory=str(directory),
             total=request.totalBytes(),
             started_at=time.time(),
+            private=private,
         )
         self._records[record.id] = record
         self._requests[record.id] = request
         request.receivedBytesChanged.connect(partial(self._on_progress, record.id))
         request.totalBytesChanged.connect(partial(self._on_progress, record.id))
         request.stateChanged.connect(partial(self._on_state, record.id))
+        request.isPausedChanged.connect(partial(self._on_paused, record.id))
         request.accept()
-        log.info("Download started: %s", target)
-        self.started.emit(record.file_name)
+        log.info("Download started: %s%s", target, " (private window)" if private else "")
+        self.started.emit(record.file_name, private)
         self.changed.emit()
 
     def _on_progress(self, record_id: str, *_: Any) -> None:
@@ -165,6 +175,13 @@ class DownloadManager(QObject):
         record.received = request.receivedBytes()
         record.total = request.totalBytes()
         self.changed.emit()
+
+    def _on_paused(self, record_id: str, *_: Any) -> None:
+        request = self._requests.get(record_id)
+        record = self._records.get(record_id)
+        if request is not None and record is not None:
+            record.paused = request.isPaused()
+            self.changed.emit()
 
     def _on_state(self, record_id: str, state: QWebEngineDownloadRequest.DownloadState) -> None:
         record = self._records.get(record_id)
@@ -178,6 +195,7 @@ class DownloadManager(QObject):
             if record.state == "interrupted":
                 record.error = request.interruptReasonString()
         if record.state != "in_progress":
+            record.paused = False
             record.finished_at = time.time()
             self._requests.pop(record_id, None)
             self.save()
@@ -190,10 +208,38 @@ class DownloadManager(QObject):
     def active_count(self) -> int:
         return len(self._requests)
 
+    def pause(self, record_id: str) -> bool:
+        """Pause an active download (QWebEngineDownloadRequest.pause)."""
+        request = self._requests.get(record_id)
+        if request is None or request.isPaused():
+            return False
+        request.pause()
+        self._on_paused(record_id)
+        return True
+
+    def resume(self, record_id: str) -> bool:
+        """Continue the same paused download; no new request or file is created."""
+        request = self._requests.get(record_id)
+        if request is None or not request.isPaused():
+            return False
+        request.resume()
+        self._on_paused(record_id)
+        return True
+
     def cancel(self, record_id: str) -> None:
+        """Cancel; QtWebEngine deletes the partial ``<name>.download`` file itself."""
         request = self._requests.get(record_id)
         if request is not None:
             request.cancel()
+
+    def forget_private(self) -> None:
+        """The private session ended: drop its download entries (downloaded files are kept)."""
+        private = [k for k, r in self._records.items() if r.private]
+        for key in private:
+            self._records.pop(key, None)
+            self._requests.pop(key, None)
+        if private:
+            self.changed.emit()
 
     def open_file(self, record_id: str) -> bool:
         record = self._records.get(record_id)

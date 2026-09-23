@@ -9,8 +9,8 @@ from functools import partial
 import shiboken6
 from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QIcon
-from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest, QWebEnginePage
-from PySide6.QtWidgets import QMainWindow, QProgressBar, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest, QWebEnginePage, QWebEngineProfile
+from PySide6.QtWidgets import QApplication, QMainWindow, QProgressBar, QStackedWidget, QVBoxLayout, QWidget
 
 from lilx import APP_NAME
 from lilx.branding import app_icon
@@ -24,6 +24,7 @@ from lilx.ui.browser_view import NEW_TAB_TITLE, BrowserView, display_url
 from lilx.ui.extension_popup import ExtensionPopup
 from lilx.ui.navigation_bar import NavigationBar
 from lilx.ui.overlays import OverlayLabel
+from lilx.ui.permission_bar import PermissionBar
 from lilx.ui.shortcuts import key_sequences
 from lilx.ui.tab_bar import TabStrip
 from lilx.ui.theme import Palette, palette_for, stylesheet
@@ -35,9 +36,19 @@ _WebWindowType = QWebEnginePage.WebWindowType
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, ctx: BrowserContext) -> None:
+    def __init__(
+        self,
+        ctx: BrowserContext,
+        private: bool = False,
+        profile: QWebEngineProfile | None = None,
+        manager: object | None = None,
+    ) -> None:
         super().__init__()
         self._ctx = ctx
+        #: private windows use the off-the-record profile and never write history
+        self.private = private
+        self._profile = profile if profile is not None else ctx.profile
+        self._manager = manager  # lilx.ui.windows.WindowManager
         self._closed_tabs: list[QUrl] = []
         self._palette: Palette = self._current_palette()
         self._was_maximized = False
@@ -52,6 +63,7 @@ class MainWindow(QMainWindow):
         self._create_actions()
         self._build_ui()
         self.apply_theme()
+        self._update_window_title()  # "lilx (Private)" from the start in private windows
 
         ctx.settings.changed.connect(self._on_setting_changed)
         QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_system_theme_changed)
@@ -97,6 +109,9 @@ class MainWindow(QMainWindow):
         self._progress_animation.setEasingCurve(animations.EASING)
         self._progress_finishing = False
 
+        self._permission_bar = PermissionBar(central)
+        self._permission_bar.answered.connect(self._on_permission_answered)
+
         self._stack = QStackedWidget(central)
         self._link_preview = OverlayLabel(self._stack, "linkPreview")
         self._toast = OverlayLabel(self._stack, "toast", align_right=True)
@@ -104,12 +119,15 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._tab_strip)
         layout.addWidget(self._nav)
         layout.addWidget(self._progress)
+        layout.addWidget(self._permission_bar)
         layout.addWidget(self._stack, 1)
         self.setCentralWidget(central)
 
     def _create_actions(self) -> None:
         handlers: dict[str, tuple[str, Callable[[], None]]] = {
             "new_tab": ("New tab", lambda: self.new_tab()),
+            "new_window": ("New window", lambda: self._open_window(private=False)),
+            "new_private_window": ("New private window", lambda: self._open_window(private=True)),
             "close_tab": ("Close tab", lambda: self.close_tab(self._tabs.currentIndex())),
             "reopen_tab": ("Reopen closed tab", self.reopen_closed_tab),
             "next_tab": ("Next tab", lambda: self._cycle_tab(1)),
@@ -130,7 +148,7 @@ class MainWindow(QMainWindow):
             "zoom_out": ("Zoom out", lambda: self._with_view(lambda v: v.zoom(-1))),
             "zoom_reset": ("Actual size", lambda: self._with_view(lambda v: v.zoom(0, self._default_zoom()))),
             "fullscreen": ("Full screen", self.toggle_fullscreen),
-            "quit": ("Quit lilx", self.close),
+            "quit": ("Quit lilx", QApplication.closeAllWindows),
             **{f"tab_{i}": ("Tab {n}", partial(self._select_tab, i - 1)) for i in range(1, 9)},
             "tab_last": ("Last tab", lambda: self._select_tab(self._tabs.count() - 1)),
         }
@@ -149,7 +167,7 @@ class MainWindow(QMainWindow):
     def _build_menu(self) -> AnimatedMenu:
         menu = AnimatedMenu(self)
         groups = (
-            ("new_tab", "reopen_tab"),
+            ("new_tab", "new_window", "new_private_window", "reopen_tab"),
             ("bookmark_page", "history", "downloads", "extensions", "settings"),
             ("zoom_in", "zoom_out", "zoom_reset", "fullscreen"),
             ("quit",),
@@ -167,6 +185,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(stylesheet(self._palette))
         self._tab_strip.set_palette(self._palette)
         self._nav.set_palette(self._palette)
+        self._nav.set_private(self.private)
+        self._permission_bar.set_palette(self._palette)
         self._update_nav_state()
         for index in range(self._tabs.count()):
             view = self._view_at(index)
@@ -254,7 +274,8 @@ class MainWindow(QMainWindow):
     def new_tab(
         self, url: QUrl | None = None, *, background: bool = False, after_current: bool = False
     ) -> BrowserView:
-        view = BrowserView(self._ctx.profile, self._ctx.settings, self._ctx.lilblock, self._create_window, self._stack)
+        view = BrowserView(self._profile, self._ctx.settings, self._ctx.lilblock, self._create_window, self._stack,
+                           permissions=self._ctx.permissions)
         view.set_zoom(self._default_zoom())
         self._stack.addWidget(view)
 
@@ -273,6 +294,7 @@ class MainWindow(QMainWindow):
         page.fullScreenRequested.connect(self._on_fullscreen_requested)
         page.renderProcessTerminated.connect(partial(self._on_render_terminated, view))
         page.blocker.count_changed.connect(partial(self._on_blocked_changed, view))
+        page.permission_requests_changed.connect(partial(self._on_permission_requests_changed, view))
 
         view.load(url if url is not None else internal_url("home"))
         if not background:
@@ -383,6 +405,7 @@ class MainWindow(QMainWindow):
         self._update_window_title()
         self._update_lilblock_button()
         self._update_bookmark_button()
+        self._update_permission_bar()
         if not self._nav.address.hasFocus():
             view.setFocus()
 
@@ -396,7 +419,7 @@ class MainWindow(QMainWindow):
         if index == self._tabs.currentIndex():
             self._update_window_title()
         url = view.url()
-        if self._ctx.settings.current.history_enabled and url.scheme() in ("http", "https"):
+        if self._records_history() and url.scheme() in ("http", "https"):
             self._ctx.history.update_title(url.toString(), title)
 
     def _on_url_changed(self, view: BrowserView, url: QUrl) -> None:
@@ -418,7 +441,7 @@ class MainWindow(QMainWindow):
     def _on_load_finished(self, view: BrowserView, ok: bool) -> None:
         self._on_load_state(view)
         url = view.url()
-        if ok and self._ctx.settings.current.history_enabled and url.scheme() in ("http", "https"):
+        if ok and self._records_history() and url.scheme() in ("http", "https"):
             self._ctx.history.add_visit(url.toString(), view.title())
 
     def _update_nav_state(self) -> None:
@@ -455,7 +478,8 @@ class MainWindow(QMainWindow):
     def _update_window_title(self) -> None:
         view = self.current_view()
         title = view.display_title() if view is not None else ""
-        self.setWindowTitle(f"{title} — {APP_NAME}" if title and title != tr(NEW_TAB_TITLE) else APP_NAME)
+        name = f"{APP_NAME} ({tr('Private')})" if self.private else APP_NAME
+        self.setWindowTitle(f"{title} — {name}" if title and title != tr(NEW_TAB_TITLE) else name)
 
     def _on_link_hovered(self, url: str) -> None:
         self._link_preview.show_text(url)
@@ -490,8 +514,9 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
 
     # ------------------------------------------------------------------ downloads
-    def _on_download_started(self, file_name: str) -> None:
-        self._toast.show_text(tr("Downloading {name}", name=file_name), 3500)
+    def _on_download_started(self, file_name: str, private: bool = False) -> None:
+        if private == self.private:  # a private download is announced in private windows only
+            self._toast.show_text(tr("Downloading {name}", name=file_name), 3500)
 
     def _on_downloads_changed(self) -> None:
         self._nav.set_downloads_active(self._ctx.downloads.active_count() > 0)
@@ -623,6 +648,10 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ extensions
     def _show_extensions_menu(self) -> None:
+        if self.private:
+            # Extensions run in the normal profile only; the private profile has none loaded.
+            self._toast.show_text(tr("Extensions are off in private windows"), 2500)
+            return
         service = self._ctx.extensions
         menu = AnimatedMenu(self)
         menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
@@ -655,12 +684,34 @@ class MainWindow(QMainWindow):
         popup.show_below(self._nav.extensions)
         return popup
 
+    # ------------------------------------------------------------------ windows & privacy
+    def _open_window(self, private: bool) -> None:
+        if self._manager is not None:
+            self._manager.open_window(private=private)
+
+    def _records_history(self) -> bool:
+        return not self.private and self._ctx.settings.current.history_enabled
+
+    # ------------------------------------------------------------------ site permissions
+    def _on_permission_requests_changed(self, view: BrowserView) -> None:
+        if view is self.current_view():
+            self._update_permission_bar()
+
+    def _update_permission_bar(self) -> None:
+        view = self.current_view()
+        self._permission_bar.show_request(view.page().next_permission_request() if view is not None else None)
+
+    def _on_permission_answered(self, request: object, allow: bool, remember: bool) -> None:
+        for index in range(self._tabs.count()):
+            view = self._view_at(index)
+            if view is not None and request in view.page().pending_permissions:
+                view.page().answer_permission(request, allow, remember)
+                break
+        self._update_permission_bar()
+
     # ------------------------------------------------------------------ shutdown
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt API)
-        try:
-            self._ctx.data.forget_sites_on_close()
-        except Exception:
-            log.exception("Forget-on-close cleanup failed")
+        # "Forget sites on close" runs when lilx quits (lilx.app.shutdown), not per window.
         while self._tabs.count():
             view = self._view_at(0)
             self._tabs.removeTab(0)

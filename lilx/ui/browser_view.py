@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QWidget
 from lilx.core.settings import SettingsManager
 from lilx.engine.lilblock import LilBlock
 from lilx.engine.page import BrowserPage, NewWindowHandler
+from lilx.engine.permissions import PermissionService
 from lilx.engine.scheme import SCHEME
 from lilx.i18n import tr
 
@@ -36,9 +37,10 @@ class BrowserView(QWebEngineView):
         lilblock: LilBlock,
         new_window: NewWindowHandler,
         parent: QWidget | None = None,
+        permissions: PermissionService | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setPage(BrowserPage(profile, settings, lilblock, new_window, self))
+        self.setPage(BrowserPage(profile, settings, lilblock, new_window, self, permissions=permissions))
         self.is_loading = False
         self.progress = 0
         self._zoom = 1.0  # wanted zoom factor, re-applied after navigations

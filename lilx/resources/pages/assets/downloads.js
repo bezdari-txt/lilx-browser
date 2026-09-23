@@ -16,7 +16,8 @@
   function statusText(item) {
     if (item.state === "in_progress") {
       const received = lilx.formatBytes(item.received);
-      return item.total > 0 ? t("downloads.of", { a: received, b: lilx.formatBytes(item.total) }) : received;
+      const size = item.total > 0 ? t("downloads.of", { a: received, b: lilx.formatBytes(item.total) }) : received;
+      return `${t(item.paused ? "downloads.paused" : "downloads.downloading")} · ${size}`;
     }
     if (item.state === "completed") {
       return item.exists ? `${lilx.formatBytes(item.total > 0 ? item.total : item.received)} · ${lilx.hostOf(item.url)}`
@@ -28,8 +29,16 @@
 
   function actions(item) {
     const button = (label, method, title) =>
-      h("button", { class: "ghost icon", type: "button", title, onclick: () => run(method, item.id) }, label);
-    if (item.state === "in_progress") return [button(t("downloads.cancel"), "downloads.cancel")];
+      h("button", { class: "ghost icon", type: "button", title, dataset: { action: method },
+                    onclick: () => run(method, item.id) }, label);
+    if (item.state === "in_progress") {
+      return [
+        item.paused
+          ? button(t("downloads.resume"), "downloads.resume")
+          : button(t("downloads.pause"), "downloads.pause"),
+        button(t("downloads.cancel"), "downloads.cancel"),
+      ];
+    }
     const list = [];
     if (item.exists) {
       list.push(button(t("downloads.open"), "downloads.open"), button(t("downloads.show"), "downloads.show"));
@@ -43,10 +52,11 @@
     return h("div", { class: "list-item" },
       h("div", { class: "avatar", "aria-hidden": "true" }, (item.file_name.split(".").pop() || "?").slice(0, 3)),
       h("div", { class: "grow" },
-        h("span", { class: "title", title: item.file_name }, item.file_name),
+        h("span", { class: "title", title: item.file_name }, item.file_name,
+          item.private ? h("span", { class: "badge private-badge" }, t("downloads.private")) : null),
         h("div", { class: "sub" }, statusText(item)),
         item.state === "in_progress"
-          ? h("div", { class: "progress" }, h("div", { style: null, dataset: { p: percent } }))
+          ? h("div", { class: `progress ${item.paused ? "paused" : ""}` }, h("div", { style: null, dataset: { p: percent } }))
           : null),
       h("div", { class: "actions" }, actions(item)));
   }

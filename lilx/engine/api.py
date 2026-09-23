@@ -18,6 +18,7 @@ from PySide6.QtGui import QFontDatabase
 from PySide6.QtWebEngineCore import qWebEngineChromiumVersion, qWebEngineVersion
 
 from lilx import __version__
+from lilx.core import permissions as perms
 from lilx.core.bookmarks import BookmarkError, BookmarkStore
 from lilx.core.downloads import DownloadManager
 from lilx.core.history import HistoryStore
@@ -121,6 +122,11 @@ class InternalApi:
             "home.top_site_hide": self._top_site_hide,
             "home.top_sites_off": lambda p: self._settings.set("show_top_sites", False),
             "settings.top_sites_restore": self._top_sites_restore,
+            "settings.permission_default": self._permission_default,
+            "settings.site_permission_set": self._site_permission_set,
+            "settings.site_permission_remove": self._site_permission_remove,
+            "settings.site_permissions_clear": self._site_permissions_clear,
+            "settings.site_permissions_reset": self._site_permissions_reset,
             "settings.site_rule_set": self._site_rule_set,
             "settings.site_rule_remove": self._site_rule_remove,
             "settings.clear_data": self._clear_data,
@@ -138,6 +144,8 @@ class InternalApi:
             "settings.open_download_dir": lambda p: self._downloads.open_directory(),
             "downloads.choose_dir": lambda p: self._choose_download_dir(),
             "downloads.open_dir": lambda p: self._downloads.open_directory(),
+            "downloads.pause": lambda p: self._downloads.pause(_str(p, "id")),
+            "downloads.resume": lambda p: self._downloads.resume(_str(p, "id")),
             "downloads.cancel": lambda p: self._downloads.cancel(_str(p, "id")),
             "downloads.open": lambda p: self._downloads.open_file(_str(p, "id")),
             "downloads.show": lambda p: self._downloads.show_in_folder(_str(p, "id")),
@@ -158,7 +166,7 @@ class InternalApi:
             return {"ok": False, "error": "this method requires POST"}
         try:
             return {"ok": True, "data": method.handler(params)}
-        except (ApiError, SettingsError, BookmarkError, ExtensionError) as exc:
+        except (ApiError, SettingsError, BookmarkError, ExtensionError, perms.PermissionRuleError) as exc:
             return {"ok": False, "error": str(exc)}
         except Exception:
             log.exception("Internal API method %s failed", name)
@@ -203,6 +211,28 @@ class InternalApi:
         self._settings.hide_top_site(host)
         return self._home_data({})
 
+    # Site permissions changed here are explicit user settings, so they are always persistent
+    # (also when Settings is opened from a private window).
+    def _permission_default(self, params: Params) -> Any:
+        self._settings.set_permission_default(_str(params, "kind"), _str(params, "value"))
+        return self._settings_get({})
+
+    def _site_permission_set(self, params: Params) -> Any:
+        self._settings.set_site_permission(_str(params, "origin"), _str(params, "kind"), _str(params, "value"))
+        return self._settings_get({})
+
+    def _site_permission_remove(self, params: Params) -> Any:
+        self._settings.remove_site_permission(_str(params, "origin"), _str(params, "kind"))
+        return self._settings_get({})
+
+    def _site_permissions_clear(self, params: Params) -> Any:
+        self._settings.clear_site_permissions(_str(params, "origin"))
+        return self._settings_get({})
+
+    def _site_permissions_reset(self, params: Params) -> Any:
+        self._settings.reset_site_permissions()
+        return self._settings_get({})
+
     def _top_sites_restore(self, params: Params) -> Any:
         self._settings.restore_top_sites()
         return self._settings_get({})
@@ -222,6 +252,7 @@ class InternalApi:
             "languages": LANGUAGES,
             "fonts": _font_families(),
             "zoom_levels": list(ZOOM_LEVELS),
+            "permission_kinds": list(perms.KINDS),
             "language": resolve_language(self._settings.current.language),
             "lilblock": {
                 "rules": self._lilblock.engine.rule_count,

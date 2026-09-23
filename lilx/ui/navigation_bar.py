@@ -91,6 +91,13 @@ class NavigationBar(QWidget):
         self.reload = self._button(self._on_reload)
         self.home = self._button(self.home_clicked)
         self.address = AddressBar(self)
+        # Shown only in private windows, left of the address bar.
+        self.private_badge = QToolButton(self)
+        self.private_badge.setObjectName("privateBadge")
+        self.private_badge.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.private_badge.setIconSize(QSize(16, 16))
+        self.private_badge.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.private_badge.hide()
         self.lilblock = self._button(self.lilblock_clicked)
         self.lilblock.setObjectName("lilblockButton")
         self.lilblock.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -110,6 +117,7 @@ class NavigationBar(QWidget):
         for button in (self.back, self.forward, self.reload, self.home):
             layout.addWidget(button)
         layout.addSpacing(6)
+        layout.addWidget(self.private_badge)
         layout.addWidget(self.address, 1)
         layout.addSpacing(4)
         layout.addWidget(self.lilblock)
@@ -136,6 +144,8 @@ class NavigationBar(QWidget):
         self.downloads.setToolTip(tr("Downloads"))
         self.bookmarks.setToolTip(tr("Bookmarks"))
         self.extensions.setToolTip(tr("Extensions"))
+        self.private_badge.setText(tr("Private"))
+        self.private_badge.setToolTip(tr("Private window: history, cookies and site data are not saved"))
         self.menu_button.setToolTip(tr("Menu"))
         self.address.setPlaceholderText(tr("Search or enter address"))
         self.set_lilblock_state(*self._lilblock_state)
@@ -154,10 +164,14 @@ class NavigationBar(QWidget):
         self.home.setIcon(icons.icon("home", color))
         self.menu_button.setIcon(icons.icon("menu", color))
         self.extensions.setIcon(icons.icon("puzzle", color))
+        self.private_badge.setIcon(icons.icon("private", palette.accent))
         self._update_reload_icon()
         self.set_downloads_active(self.downloads.property("active") is True)
         self.set_lilblock_state(*self._lilblock_state)
         self.set_bookmarked(self._bookmarked)
+
+    def set_private(self, private: bool) -> None:
+        self.private_badge.setVisible(private)
 
     def set_bookmarked(self, bookmarked: bool) -> None:
         """Filled accent star when the current page is in the bookmarks."""

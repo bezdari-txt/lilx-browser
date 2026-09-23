@@ -205,8 +205,11 @@ class LilBlock(QObject):
     def active_for(self, page_host: str) -> bool:
         return self.enabled and bool(page_host) and not self.is_allowed_site(page_host)
 
-    def check(self, info: QWebEngineUrlRequestInfo, page_host: str) -> bool:
-        """Block the request if a filter matches. Returns True when blocked."""
+    def check(self, info: QWebEngineUrlRequestInfo, page_host: str, record: bool = True) -> bool:
+        """Block the request if a filter matches. Returns True when blocked.
+
+        ``record=False`` (private windows) blocks without writing to the saved block history.
+        """
         url = info.requestUrl()
         if url.scheme() not in ("http", "https", "ws", "wss"):
             return False
@@ -221,6 +224,8 @@ class LilBlock(QObject):
         if rule is None:
             return False
         info.block(True)
+        if not record:
+            return True
         page_for_log = first_party if self._settings.current.history_enabled else ""
         # Query strings often carry identifiers; they are not kept in the history.
         clean_url = request.url.split("?", 1)[0].split("#", 1)[0]
@@ -234,9 +239,10 @@ class PageBlocker(QWebEngineUrlRequestInterceptor):
 
     count_changed = Signal(int)
 
-    def __init__(self, lilblock: LilBlock, parent: QObject | None = None) -> None:
+    def __init__(self, lilblock: LilBlock, parent: QObject | None = None, record: bool = True) -> None:
         super().__init__(parent)
         self._lilblock = lilblock
+        self._record = record
         self._page_host = ""
         self.count = 0
 
@@ -256,7 +262,7 @@ class PageBlocker(QWebEngineUrlRequestInterceptor):
         if info.resourceType() in (_Type.ResourceTypeMainFrame, _Type.ResourceTypeNavigationPreloadMainFrame):
             self._page_host = info.requestUrl().host()
             return
-        if self._lilblock.check(info, self._page_host):
+        if self._lilblock.check(info, self._page_host, self._record):
             self.count += 1
             self.count_changed.emit(self.count)
 
@@ -265,10 +271,11 @@ class ProfileBlocker(QWebEngineUrlRequestInterceptor):
     """Profile-wide interceptor for requests that do not belong to a page's own
     interceptor (service workers, shared workers, …): privacy headers + lilBlock."""
 
-    def __init__(self, lilblock: LilBlock, parent: QObject | None = None) -> None:
+    def __init__(self, lilblock: LilBlock, parent: QObject | None = None, record: bool = True) -> None:
         super().__init__(parent)
         self._lilblock = lilblock
+        self._record = record
 
     def interceptRequest(self, info: QWebEngineUrlRequestInfo) -> None:  # noqa: N802 (Qt API)
         apply_privacy_headers(info, self._lilblock.settings)
-        self._lilblock.check(info, "")
+        self._lilblock.check(info, "", self._record)

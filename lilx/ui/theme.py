@@ -183,6 +183,20 @@ def stylesheet(p: Palette) -> str:
     }}
     #toast {{ color: {p.text}; padding: 8px 14px; font-size: 13px; }}
 
+    #privateBadge {{
+        color: {p.accent}; font-size: 12px; font-weight: 600;
+        border: 1px solid {p.border}; border-radius: 9px; padding: 3px 8px; margin-right: 6px;
+    }}
+    #privateBadge:hover {{ background: transparent; }}
+    #permissionBar {{ background: {p.toolbar}; border-bottom: 1px solid {p.border}; }}
+    #permissionText {{ font-size: 13px; }}
+    #permissionBar QPushButton {{
+        background: {p.field}; color: {p.text}; border: 1px solid {p.border};
+        border-radius: 8px; padding: 5px 14px; font-weight: 500;
+    }}
+    #permissionBar QPushButton:hover {{ background: {p.hover}; }}
+    #permissionBar QPushButton#permissionAllow {{ background: {p.accent}; color: {p.accent_text}; border-color: {p.accent}; }}
+    #permissionBar QCheckBox {{ color: {p.muted}; font-size: 12px; }}
     #extensionPopup {{ background: {p.toolbar}; border: 1px solid {p.border}; }}
 
     /* ---- menus ---- */

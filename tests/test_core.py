@@ -344,5 +344,155 @@ class BrandingTests(unittest.TestCase):
         self.assertIn(b"ic10", icns)  # 1024 px (512@2x)
 
 
+class PermissionRuleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from lilx.core import permissions
+
+        self.p = permissions
+
+    def test_origin_normalization(self) -> None:
+        n = self.p.normalize_origin
+        self.assertEqual(n("HTTPS://Example.COM:443/path?q=1"), "https://example.com")
+        self.assertEqual(n("http://example.com:80/"), "http://example.com")
+        self.assertEqual(n("https://example.com:8443"), "https://example.com:8443")
+        self.assertEqual(n("https://пример.рф/"), "https://xn--e1afmkfd.xn--p1ai")
+        self.assertEqual(n("http://[::1]:8080/"), "http://[::1]:8080")
+        for bad in ("file:///etc/passwd", "lilx://settings", "chrome-extension://abc/", "example.com", "https://"):
+            with self.subTest(bad=bad), self.assertRaises(self.p.PermissionRuleError):
+                n(bad)
+
+    def test_global_defaults(self) -> None:
+        origin = "https://example.com"
+        for default in ("ask", "allow", "block"):
+            with self.subTest(default=default):
+                self.assertEqual(self.p.resolve("camera", origin, {"camera": default}, {}), default)
+
+    def test_global_block_beats_site_allow(self) -> None:
+        rules = {"https://example.com": {"geolocation": "allow"}}
+        self.assertEqual(self.p.resolve("geolocation", "https://example.com", {"geolocation": "block"}, rules), "block")
+
+    def test_site_rules(self) -> None:
+        rules = {"https://example.com": {"camera": "allow", "microphone": "block"}}
+        defaults = {"camera": "ask", "microphone": "allow"}
+        self.assertEqual(self.p.resolve("camera", "https://example.com", defaults, rules), "allow")
+        self.assertEqual(self.p.resolve("microphone", "https://example.com", defaults, rules), "block")
+
+    def test_rules_do_not_leak_between_origins(self) -> None:
+        rules = {"https://example.com": {"camera": "allow"}}
+        defaults = {"camera": "ask"}
+        for other in ("http://example.com", "https://mail.example.com", "https://example.com:8443",
+                      "https://example.com.evil.net", "https://notexample.com"):
+            with self.subTest(other=other):
+                self.assertEqual(self.p.resolve("camera", other, defaults, rules), "ask")
+
+    def test_combined_camera_and_microphone(self) -> None:
+        many = self.p.resolve_many
+        origin = "https://meet.example.org"
+        self.assertEqual(many(("camera", "microphone"), origin, {"camera": "allow", "microphone": "allow"}, {}), "allow")
+        self.assertEqual(many(("camera", "microphone"), origin, {"camera": "allow", "microphone": "ask"}, {}), "ask")
+        self.assertEqual(many(("camera", "microphone"), origin, {"camera": "allow", "microphone": "block"}, {}), "block")
+
+    def test_settings_permissions_and_compatibility(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = PlainFileStorage(Path(tmp))
+            (Path(tmp) / "settings.json").write_text('{"theme": "dark", "site_permissions": {"bad": {"camera": "allow"}},'
+                                                     ' "permission_defaults": {"camera": "nonsense"}}')
+            manager = SettingsManager(storage)  # old / broken values must not crash
+            self.assertEqual(manager.current.theme, "dark")
+            self.assertEqual(manager.current.permission_defaults["camera"], "ask")
+            self.assertEqual(manager.current.site_permissions, {})
+            manager.set_permission_default("geolocation", "block")
+            manager.set_site_permission("https://Example.com/x", "camera", "allow")
+            manager.set_site_permission("https://example.com", "microphone", "block")
+            manager.set_site_permission("https://meet.example.org", "camera", "allow")
+            reloaded = SettingsManager(storage).current
+            self.assertEqual(reloaded.permission_defaults["geolocation"], "block")
+            self.assertEqual(reloaded.site_permissions["https://example.com"], {"camera": "allow", "microphone": "block"})
+            manager.remove_site_permission("https://example.com", "camera")
+            self.assertEqual(SettingsManager(storage).current.site_permissions["https://example.com"], {"microphone": "block"})
+            manager.clear_site_permissions("https://example.com")
+            self.assertNotIn("https://example.com", SettingsManager(storage).current.site_permissions)
+            manager.reset_site_permissions()
+            self.assertEqual(SettingsManager(storage).current.site_permissions, {})
+            with self.assertRaises(ValueError):
+                manager.set_permission_default("camera", "maybe")
+            with self.assertRaises(ValueError):
+                manager.set_site_permission("https://example.com", "camera", "ask")  # sites: allow/block only
+
+    def test_private_decisions_stay_in_memory(self) -> None:
+        from lilx.engine.permissions import PermissionRequest, PermissionService
+
+        class FakePermission:
+            def __init__(self) -> None:
+                self.result = None
+
+            def isValid(self) -> bool:  # noqa: N802 (Qt API)
+                return True
+
+            def grant(self) -> None:
+                self.result = "granted"
+
+            def deny(self) -> None:
+                self.result = "denied"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = PlainFileStorage(Path(tmp))
+            settings = SettingsManager(storage)
+            service = PermissionService(settings)
+            origin = "https://private.example"
+            request = PermissionRequest(FakePermission(), ("camera",), origin, private=True)
+            service.answer(request, allow=True, remember=True)
+            self.assertEqual(request.permission.result, "granted")
+            self.assertEqual(service.decide(("camera",), origin, private=True), "allow")
+            self.assertEqual(service.decide(("camera",), origin, private=False), "ask")  # normal windows unaffected
+            self.assertEqual(SettingsManager(storage).current.site_permissions, {})  # nothing on disk
+            self.assertNotIn(b"private.example", (Path(tmp) / "settings.json").read_bytes()
+                             if (Path(tmp) / "settings.json").exists() else b"")
+            service.clear_private()
+            self.assertEqual(service.decide(("camera",), origin, private=True), "ask")
+            # A normal-window decision is persistent; a global block still wins afterwards.
+            normal = PermissionRequest(FakePermission(), ("camera",), origin, private=False)
+            service.answer(normal, allow=True, remember=True)
+            self.assertEqual(SettingsManager(storage).current.site_permissions[origin], {"camera": "allow"})
+            settings.set_permission_default("camera", "block")
+            late = PermissionRequest(FakePermission(), ("camera",), origin, private=False)
+            service.answer(late, allow=True, remember=False)
+            self.assertEqual(late.permission.result, "denied")
+
+
+class ProfileAndDownloadTests(unittest.TestCase):
+    def test_named_profiles(self) -> None:
+        base = AppPaths.default()
+        work = AppPaths.default("work")
+        self.assertEqual(work.data_dir, base.data_dir / "profiles" / "work")
+        self.assertEqual(AppPaths.default("default"), base)
+        for bad in ("../x", "a/b", "x" * 41, "with space"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                AppPaths.default(bad)
+
+    def test_private_downloads_are_not_saved(self) -> None:
+        import json
+
+        from lilx.core.downloads import DownloadManager, DownloadRecord
+
+        with tempfile.TemporaryDirectory() as tmp:
+            storage = PlainFileStorage(Path(tmp))
+            manager = DownloadManager(storage, SettingsManager(storage))
+            manager._records["a"] = DownloadRecord("a", "https://x/a", "a.bin", tmp, state="completed")
+            manager._records["b"] = DownloadRecord("b", "https://x/b", "b.bin", tmp, state="completed", private=True)
+            manager.save()
+            saved = json.loads((Path(tmp) / "downloads.json").read_text())
+            self.assertEqual([r["id"] for r in saved], ["a"])
+            manager.forget_private()
+            self.assertEqual([r.id for r in manager.records()], ["a"])
+
+    def test_paused_state_is_not_restored(self) -> None:
+        from lilx.core.downloads import DownloadRecord
+
+        record = DownloadRecord.from_dict({"id": "x", "url": "u", "file_name": "f", "directory": "d",
+                                           "state": "in_progress", "paused": True})
+        self.assertEqual((record.state, record.paused), ("interrupted", False))
+
+
 if __name__ == "__main__":
     unittest.main()

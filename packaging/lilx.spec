@@ -53,5 +53,10 @@ if sys.platform == "darwin":
             "CFBundleName": "lilx",
             "CFBundleDisplayName": "lilx",
             "NSHighResolutionCapable": True,
+            # macOS asks the user for these devices only if the app says why (site permissions).
+            "NSCameraUsageDescription": "Websites you allow can use the camera.",
+            "NSMicrophoneUsageDescription": "Websites you allow can use the microphone.",
+            "NSLocationUsageDescription": "Websites you allow can use your location.",
+            "NSLocationWhenInUseUsageDescription": "Websites you allow can use your location.",
         },
     )

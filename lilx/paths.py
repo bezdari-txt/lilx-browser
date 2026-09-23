@@ -11,6 +11,7 @@ Environment overrides:
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ from pathlib import Path
 from lilx import APP_NAME
 
 _PRIVATE_DIR_MODE = 0o700
+_PROFILE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
 
 def _platform_data_root() -> Path:
@@ -48,12 +50,24 @@ class AppPaths:
     cache_dir: Path
 
     @classmethod
-    def default(cls) -> AppPaths:
+    def default(cls, profile: str = "") -> AppPaths:
+        """Paths of the default profile, or of a named one (``lilx --profile work``).
+
+        A named profile is a complete, separate set of lilx data (settings, history,
+        bookmarks, cookies, storage) in ``<data dir>/profiles/<name>``.
+        """
         override = os.environ.get("LILX_DATA_DIR")
         if override:
             root = Path(override).expanduser().resolve()
-            return cls(data_dir=root, cache_dir=root / "cache")
-        return cls(data_dir=_platform_data_root(), cache_dir=_platform_cache_root())
+            paths = cls(data_dir=root, cache_dir=root / "cache")
+        else:
+            paths = cls(data_dir=_platform_data_root(), cache_dir=_platform_cache_root())
+        name = profile.strip()
+        if not name or name == "default":
+            return paths
+        if not _PROFILE_NAME.match(name):
+            raise ValueError("profile names may use letters, digits, '-' and '_' (up to 40)")
+        return cls(data_dir=paths.data_dir / "profiles" / name, cache_dir=paths.cache_dir / "profiles" / name)
 
     @property
     def history_db(self) -> Path:

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="{{lang}}" data-theme="{{theme}}">
+<html lang="{{lang}}" data-theme="{{theme}}" data-private="{{private}}">
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; form-action 'none'; base-uri 'none'">
@@ -109,6 +109,18 @@
     <section class="card">
       <h2 data-i18n="settings.privacy"></h2>
       <div id="privacy-toggles"></div>
+    </section>
+
+    <section class="card" id="permissions">
+      <h2 data-i18n="perm.title"></h2>
+      <p class="hint" data-i18n="perm.hint"></p>
+      <div id="permission-defaults"></div>
+      <h3 data-i18n="perm.sites"></h3>
+      <p class="hint" data-i18n="perm.sites_hint"></p>
+      <div id="site-permissions"></div>
+      <div class="actions">
+        <button class="danger" id="reset-site-permissions" type="button" data-i18n="perm.reset"></button>
+      </div>
     </section>
 
     <section class="card" id="lilblock">

@@ -85,12 +85,14 @@ class LilxSchemeHandler(QWebEngineUrlSchemeHandler):
         language: Callable[[], str],
         theme_css: Callable[[], str],
         parent: QObject | None = None,
+        private: bool = False,
     ) -> None:
         super().__init__(parent)
         self._api = api
         self._theme = theme
         self._language = language
         self._theme_css = theme_css
+        self._private = private  # handler of the private profile: pages show that they are private
 
     def requestStarted(self, job: QWebEngineUrlRequestJob) -> None:  # noqa: N802 (Qt API)
         try:
@@ -126,7 +128,8 @@ class LilxSchemeHandler(QWebEngineUrlSchemeHandler):
 
     def _serve_page(self, job: QWebEngineUrlRequestJob, page: str) -> None:
         html = (PAGES_DIR / f"{page}.html").read_text(encoding="utf-8")
-        html = html.replace("{{theme}}", self._theme()).replace("{{lang}}", self._language())
+        html = (html.replace("{{theme}}", self._theme()).replace("{{lang}}", self._language())
+                .replace("{{private}}", "1" if self._private else "0"))
         self._reply(job, _CONTENT_TYPES[".html"], html.encode("utf-8"))
 
     def _serve_asset(self, job: QWebEngineUrlRequestJob, relative: str) -> None:
